@@ -742,6 +742,12 @@ it("home lists favorited feeds and nothing else", async () => {
               const link = document.querySelector('[data-testid="home-favorite-link"]')
               if (link) return resolve({
                 links: document.querySelectorAll('[data-testid="home-favorite-link"]').length,
+                groups: document.querySelectorAll('[data-testid="home-category"]').length,
+                category: (() => {
+                  const group = link.closest('[data-testid="home-category"]')
+                  const title = group?.querySelector('[data-testid="home-category-title"]')
+                  return title ? title.textContent.trim() : ''
+                })(),
                 label: link.textContent.trim(),
                 href: link.getAttribute('href'),
                 starred: !!document.querySelector('[data-testid="feed-favorite"]'),
@@ -758,6 +764,8 @@ it("home lists favorited feeds and nothing else", async () => {
         })()
       `)) as {
       links: number;
+      groups: number;
+      category: string;
       label: string;
       href: string;
       starred: boolean;
@@ -766,6 +774,8 @@ it("home lists favorited feeds and nothing else", async () => {
     console.log("home after favoriting:", JSON.stringify(after));
     expect(after).not.toBeNull();
     expect(after!.links).toBe(1);
+    expect(after!.groups).toBe(1); // one heading, not one per link
+    expect(after!.category).toBe("Tech"); // the favorite sits under its category
     expect(after!.label).toContain("Blog");
     expect(after!.href).toMatch(/^\/?\?feed=/);
     expect(after!.starred).toBe(true); // sidebar marks it too

@@ -43,6 +43,8 @@ import {
 import { epochMs, type CategoryId, type EntryId, type FeedId } from '../shared/ids'
 import { zodEntriesFilter, type EntriesFilter } from '../shared/filter'
 import { DEFAULT_HIDE_EMPTY_FEEDS, resolveViewFilter, type FeedPrefs, type UserPrefs } from '../shared/prefs'
+import { editFeed as editFeedInDb, subscribe as subscribeFeed } from '../server/fetch/subscribe'
+import { importOpml as importOpmlFile } from '../server/opml'
 
 const db = () => appDb().db
 
@@ -232,15 +234,49 @@ export const setPrefs = authed(
 
 const titleSchema = z.string().min(1).max(500)
 
-export const renameFeed = authed(async ({ user }, feedId: FeedId, title: string) => {
-  const changed = db()
-    .update(feeds)
-    .set({ title: parse(titleSchema, title) })
-    .where(and(eq(feeds.id, feedId), eq(feeds.userId, user.id)))
-    .returning({ id: feeds.id })
-    .all()
-  if (changed.length === 0) throw new HttpError(404, 'feed not found')
-  return { ok: true as const }
+const folderFields = {
+  categoryId: z.string().max(64).nullable().optional(),
+  newCategoryTitle: z.string().trim().min(1).max(500).optional(),
+}
+
+const addFeedSchema = z
+  .object({
+    url: z.string().trim().min(1).max(2048),
+    title: z.string().trim().max(500).optional(),
+    ...folderFields,
+  })
+  .strict()
+
+export const addFeed = authed(async ({ user }, input: unknown) => {
+  const parsed = parse(addFeedSchema, input)
+  return subscribeFeed(appDb(), {
+    userId: user.id,
+    url: parsed.url,
+    title: parsed.title,
+    categoryId: parsed.categoryId,
+    newCategoryTitle: parsed.newCategoryTitle,
+  })
+})
+
+const editFeedSchema = z
+  .object({
+    feedId: z.string().min(1).max(64),
+    title: z.string().trim().min(1).max(500).optional(),
+    feedUrl: z.string().trim().min(1).max(2048).optional(),
+    ...folderFields,
+  })
+  .strict()
+
+export const editFeed = authed(async ({ user }, input: unknown) => {
+  const parsed = parse(editFeedSchema, input)
+  return editFeedInDb(appDb(), {
+    userId: user.id,
+    feedId: parsed.feedId as FeedId,
+    title: parsed.title,
+    feedUrl: parsed.feedUrl,
+    categoryId: parsed.categoryId,
+    newCategoryTitle: parsed.newCategoryTitle,
+  })
 })
 
 export const renameCategory = authed(async ({ user }, categoryId: CategoryId, title: string) => {
@@ -252,6 +288,11 @@ export const renameCategory = authed(async ({ user }, categoryId: CategoryId, ti
     .all()
   if (changed.length === 0) throw new HttpError(404, 'category not found')
   return { ok: true as const }
+})
+
+export const importOpml = authed(async ({ user }, text: unknown) => {
+  const body = parse(z.string().min(1).max(5_000_000), text)
+  return importOpmlFile(appDb(), { userId: user.id, text: body })
 })
 
 export const unsubscribe = authed(async ({ user }, feedId: FeedId) => {

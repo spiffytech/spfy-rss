@@ -55,9 +55,9 @@ export const feeds = sqliteTable(
       .$type<UserId>()
       .notNull()
       .references(() => users.id),
+    /** Null means the feed is uncategorized. Folders stay flat. */
     categoryId: text('category_id')
       .$type<CategoryId>()
-      .notNull()
       .references(() => categories.id),
     title: text('title').notNull(),
     feedUrl: text('feed_url').notNull(),

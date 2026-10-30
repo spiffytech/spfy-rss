@@ -420,7 +420,7 @@ it("display pipeline sanitizes hostile HTML in a real browser", async () => {
     );
     const pencil = (await view.evaluate(`
       (() => {
-        const b = document.querySelector('button[title="Rename feed"]')
+        const b = document.querySelector('button[title="Edit feed"]')
         if (!b) return { exists: false }
         const r = b.getBoundingClientRect()
         const cs = getComputedStyle(b)
@@ -428,14 +428,14 @@ it("display pipeline sanitizes hostile HTML in a real browser", async () => {
       })()
     `)) as Record<string, unknown>;
     console.log("pencil probe:", JSON.stringify(pencil));
-    // Click the hover-pencil: the rename editor must take the cursor on appear.
-    const renameFocus = (await view.evaluate(`
+    // Click the hover-pencil: the edit form must open with the URL field focused.
+    const editFocus = (await view.evaluate(`
       (() => {
-        document.querySelector('button[title="Rename feed"]').click()
+        document.querySelector('button[title="Edit feed"]').click()
         return new Promise((resolve) => {
           const deadline = Date.now() + 2000
           const tick = () => {
-            const input = document.querySelector('[data-testid="feed-panel"] input')
+            const input = document.querySelector('dialog[open] #feed-url')
             if (input && document.activeElement === input) return resolve({ found: true, focused: true })
             if (Date.now() > deadline) return resolve({ found: !!input, focused: false })
             setTimeout(tick, 25)
@@ -444,7 +444,7 @@ it("display pipeline sanitizes hostile HTML in a real browser", async () => {
         })
       })()
     `)) as { found: boolean; focused: boolean };
-    console.log("rename focus probe:", JSON.stringify(renameFocus));
+    console.log("edit focus probe:", JSON.stringify(editFocus));
     expect(report.hasScript).toBe(false); // <script> stripped
     // The chrome itself — the navbar and sidebar the old app had (regression
     // guard for the port: these must survive any future restyle pass).
@@ -459,7 +459,7 @@ it("display pipeline sanitizes hostile HTML in a real browser", async () => {
     expect(report.bodyOverflow).toBe("hidden");
     expect(report.documentScrolls).toBe(false);
     expect(report.listScrolls).toBe(true);
-    expect(renameFocus.focused).toBe(true); // rename editor takes the cursor when it appears
+    expect(editFocus.focused).toBe(true); // edit form opens with the URL field focused
     expect(report.hasOnclick).toBe(false); // event handlers stripped
     expect(report.hasJsUrl).toBe(false); // javascript: URL stripped
     expect(report.imgLoading).toBe("lazy"); // applyEmbedHints: the old lazyHtml pass

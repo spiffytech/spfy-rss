@@ -30,12 +30,20 @@ export function openDatabase(path: string): {
   const sqlite = openBunDatabase(path)
   applyPragmas(sqlite)
   const db = drizzle(sqlite)
-  // MIGRATIONS_DIR for the bundled server (import.meta.url lands inside
-  // build/ chunks there, so the relative path stops resolving); dev default
-  // unchanged.
-  migrate(db, {
-    migrationsFolder: process.env.MIGRATIONS_DIR ?? fileURLToPath(new URL('../../../drizzle/', import.meta.url)),
-  })
+  // SQLite cannot drop/rebuild a table that children reference while foreign
+  // keys are ON, and the PRAGMA is a no-op inside the migrator's transaction.
+  // Toggle it around the migration run (trusted, app-owned SQL), then restore.
+  sqlite.run('PRAGMA foreign_keys = OFF')
+  try {
+    // MIGRATIONS_DIR for the bundled server (import.meta.url lands inside
+    // build/ chunks there, so the relative path stops resolving); dev default
+    // unchanged.
+    migrate(db, {
+      migrationsFolder: process.env.MIGRATIONS_DIR ?? fileURLToPath(new URL('../../../drizzle/', import.meta.url)),
+    })
+  } finally {
+    sqlite.run('PRAGMA foreign_keys = ON')
+  }
   return { sqlite, db }
 }
 

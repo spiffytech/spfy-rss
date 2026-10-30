@@ -4,7 +4,6 @@ import { useNavigate, useSearchParams } from "@solidjs/router";
 import type { FeedId } from "../shared/ids";
 import { computePopoverPlacement } from "../shared/popover";
 import { DEFAULT_HIDE_EMPTY_FEEDS } from "../shared/prefs";
-import { autofocus } from "../lib/observers";
 import { createSearch } from "../lib/search";
 import * as api from "../server/actions";
 import { useReader } from '../lib/reader-context'
@@ -28,7 +27,7 @@ const PANEL_ID = "feed-menu";
  */
 export const FeedMenu = () => {
   const r = useReader()
-  const { cancelRename, currentTitle, effectiveViewMode, isFavorite, markDisplayed, refreshFeeds, saveRename, setHideReadItems, setRenameTitle, setSort, setViewMode, startRename, toggleAutoRead, toggleFavorite, toggleHideEmptyFeeds, unreadCount, unsubscribe } = r
+  const { currentTitle, effectiveViewMode, isFavorite, markDisplayed, openEditFeed, refreshFeeds, setHideReadItems, setSort, setViewMode, toggleAutoRead, toggleFavorite, toggleHideEmptyFeeds, unreadCount, unsubscribe } = r
   // A setting in its affirmative state (enabled, hidden) carries the accent
   // fill. This follows the row's own value, not the underlying boolean: blue on
   // "Auto-read: disabling" would read as a contradiction.
@@ -46,14 +45,12 @@ export const FeedMenu = () => {
   const [open, setOpen] = createSignal(false);
 
   const feedId = () => r.filter().feedId;
-  // Rename/unsubscribe/sort/auto-read only mean something for one feed — Latest,
+  // Edit/unsubscribe/sort/auto-read only mean something for one feed — Latest,
   // Starred and category views are aggregates.
   const isFeedView = () => feedId() != null && feedId() !== "";
   const searchActive = () => Boolean(r.filter().search);
   const autoReadOff = () =>
     (r.panel.userPrefs.disabledAutoReadFeeds ?? []).includes(feedId() as FeedId);
-
-  const [renameOpen, setRenameOpen] = createSignal(false);
 
   const title = createMemo(() => currentTitle());
   const unread = createMemo(() => unreadCount());
@@ -113,7 +110,6 @@ export const FeedMenu = () => {
   const onClose = (): void => {
     setOpen(false);
     unwatchTrigger();
-    setRenameOpen(false);
   };
 
   /**
@@ -155,35 +151,11 @@ export const FeedMenu = () => {
   const onHideReadItems = () => runAndClose(() => setHideReadItems(!r.hidesReadItems()));
   const onClearSearch = () => runAndClose(() => search.clearSearch());
 
-  // The editor's text lives in the reader's session, so the sidebar and this
-  // popover rename through one implementation instead of two.
-  const startRenameEditor = (): void => {
-    startRename(feedId() as string, "feed", currentTitle());
-    setRenameOpen(true);
-  };
-
-  const cancelRenameEditor = (): void => {
-    cancelRename();
-    setRenameOpen(false);
-  };
-
-  const saveRenameEditor = async (): Promise<void> => {
-    try {
-      await saveRename();
-    } finally {
-      setRenameOpen(false);
-      closePanel();
-    }
-  };
-
-  const onRenameKeydown = (event: KeyboardEvent): void => {
-    if (event.key !== "Escape") return;
-    // Escape is also the dialog's dismiss key. Claim it while the rename field is
-    // what's being escaped; if a browser still closes the panel, the close
-    // handler cancels the rename anyway, so the worst case is a coarser escape.
-    event.preventDefault();
-    event.stopPropagation();
-    cancelRenameEditor();
+  const onEditFeed = (): void => {
+    const id = feedId();
+    if (id == null || id === "") return;
+    openEditFeed(id as FeedId);
+    closePanel();
   };
 
   const onToggleFavorite = (): Promise<void> =>
@@ -247,10 +219,7 @@ export const FeedMenu = () => {
         onClick={onPanelClick}
         onClose={onClose}
       >
-        <Show
-          when={renameOpen()}
-          fallback={
-            <div class="flex flex-col">
+        <div class="flex flex-col">
               {/* Search: the only one on mobile, since the toolbar box is desktop
                   only. "Clear search" lives with it and is equally hidden on
                   desktop, where the toolbar box itself is the way to clear. */}
@@ -335,9 +304,8 @@ export const FeedMenu = () => {
                 </Show>
               </div>
 
-              {/* Commands, in a two-up grid: always an even count, so no cell is
-                  ever left half-empty. The two "leave" actions pair on the last
-                  row. */}
+              {/* Commands, in a two-up grid. Sign out spans the last row on its
+                  own, so no cell is ever left half-empty. */}
               <div class="p-2 grid grid-cols-2 gap-1">
                 <button type="button" class="menu-row" onClick={onRefresh}>
                   Refresh feeds
@@ -351,8 +319,8 @@ export const FeedMenu = () => {
                   >
                     {isFavorite(feedId() as FeedId) ? "Unfavorite feed" : "Favorite feed"}
                   </button>
-                  <button type="button" class="menu-row" onClick={startRenameEditor}>
-                    Rename feed…
+                  <button type="button" class="menu-row" onClick={onEditFeed}>
+                    Edit feed…
                   </button>
                   <button
                     type="button"
@@ -362,52 +330,11 @@ export const FeedMenu = () => {
                     Unsubscribe
                   </button>
                 </Show>
-                <button type="button" class="menu-row" onClick={() => void onLogout()}>
+                <button type="button" class="menu-row col-span-2" onClick={() => void onLogout()}>
                   Sign out
                 </button>
               </div>
-            </div>
-          }
-        >
-          <form
-            class="p-3 flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveRenameEditor();
-            }}
-          >
-            <label
-              for="feed-rename"
-              class="text-xs font-semibold uppercase tracking-wide text-muted"
-            >
-              Rename feed
-            </label>
-            <input
-              id="feed-rename"
-              type="text"
-              ref={autofocus}
-              class="w-full min-h-11 px-3 py-2 border border-line rounded-lg"
-              value={r.session.renameTitle}
-              onInput={(event) => setRenameTitle(event.currentTarget.value)}
-              onKeyDown={onRenameKeydown}
-            />
-            <div class="flex gap-2">
-              <button
-                type="submit"
-                class="flex-1 min-h-11 rounded-lg bg-accent text-white font-medium cursor-pointer hover:brightness-95 active:brightness-90"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                class="flex-1 min-h-11 rounded-lg bg-gray-50 text-ink cursor-pointer hover:bg-gray-100 active:bg-gray-200"
-                onClick={cancelRenameEditor}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Show>
+        </div>
       </dialog>
     </div>
   );

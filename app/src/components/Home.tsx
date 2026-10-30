@@ -25,11 +25,11 @@ export const Home = () => {
   /** Unread favorites bucketed by category, categories in alphabetical order. */
   const groups = createMemo(() => {
     const titles = new Map(r.panel.categories.map((category) => [category.id, category.title]))
-    const byCategory = new Map<CategoryId, { id: CategoryId; title: string; feeds: FeedInfo[] }>()
+    const byCategory = new Map<CategoryId | null, { id: CategoryId | null; title: string; feeds: FeedInfo[] }>()
     for (const feed of unread()) {
       const group = byCategory.get(feed.categoryId) ?? {
         id: feed.categoryId,
-        title: titles.get(feed.categoryId) ?? 'Uncategorized',
+        title: feed.categoryId === null ? 'Uncategorized' : (titles.get(feed.categoryId) ?? 'Uncategorized'),
         feeds: [],
       }
       group.feeds.push(feed)

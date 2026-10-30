@@ -8,6 +8,7 @@ import { fetchAndIngest } from './server/fetch/fetch-feed'
 import { livenessReport, schedulerReport, type HealthReport } from './server/health'
 import { loadSchedulerConfig } from './server/scheduler/config'
 import { readHeartbeat } from './server/scheduler/heartbeat'
+import { exportOpml } from './server/opml'
 import { verifySignature } from './server/websub'
 
 export interface ApiContext {
@@ -38,6 +39,7 @@ export const handleApiRoute = async (
 
   if (path === '/health' && request.method === 'GET') return healthResponse()
   if (path === '/health/scheduler' && request.method === 'GET') return schedulerHealthResponse()
+  if (path === '/opml' && request.method === 'GET') return opmlResponse(context.user)
 
   if (path.startsWith('/api/websub/')) return webSubResponse(request, url)
 
@@ -83,6 +85,21 @@ const healthResponse = (): Response => {
  */
 const schedulerHealthResponse = (): Response =>
   toResponse(schedulerReport(readHeartbeat(), staleAfterMinutes()))
+
+/**
+ * OPML export. Authenticated like the reader itself: it is a complete map of
+ * one account's subscriptions. The old app's Miniflux import/export namespace
+ * is not emitted — this is plain OPML 2.0.
+ */
+const opmlResponse = (user: SessionUser | null): Response => {
+  if (!user) return new Response('not authenticated', { status: 401 })
+  return new Response(exportOpml(appDb(), user.id), {
+    headers: {
+      'content-type': 'text/x-opml; charset=utf-8',
+      'content-disposition': 'attachment; filename="subscriptions.opml"',
+    },
+  })
+}
 
 /**
  * One feed's icon. Authenticated, but deliberately not owner-scoped: what it

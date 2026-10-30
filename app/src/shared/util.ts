@@ -21,7 +21,7 @@ export function compareTitlesCI(a: string, b: string): number {
  */
 export function computeUnreadCount(
   filter: { feedId?: string; categoryId?: string; starred?: boolean },
-  feeds: Array<{ id: string; categoryId?: string }>,
+  feeds: Array<{ id: string; categoryId?: string | null }>,
   unreads: Record<string, number>,
 ): number | null {
   if (filter.feedId != null && filter.feedId !== '') {

@@ -8,6 +8,7 @@ import { createReader } from "../lib/reader";
 import { ReaderContext } from "../lib/reader-context";
 import { Delayed } from "../components/Delayed";
 import { FeedPanel } from "../components/FeedPanel";
+import { FeedFormDialog } from "../components/FeedFormDialog";
 import { Home } from "../components/Home";
 import { EntryList } from "../components/EntryList";
 import { watchScroll } from "../lib/observers";
@@ -263,6 +264,7 @@ export const ReaderPage = () => {
               </div>
             </div>
           </div>
+        <FeedFormDialog />
       </Loading>
     </ReaderContext>
   );

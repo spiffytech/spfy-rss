@@ -34,7 +34,8 @@ export type CategoryCount = {
 
 export type FeedInfo = {
   id: FeedId
-  categoryId: CategoryId
+  /** Null = uncategorized. */
+  categoryId: CategoryId | null
   title: string
   siteUrl: string | null
   feedUrl: string
@@ -58,6 +59,27 @@ export type FeedPanelResult = {
   /** Per-feed preferences (favourite, view mode, sort, hide-read). */
   feedPrefs: Record<FeedId, FeedPrefs>
 }
+
+/**
+ * Outcome of adding or editing a feed. Failures are values, not thrown errors:
+ * the RPC transport carries HTTP statuses but no messages, and the form needs
+ * to say *why* a save failed.
+ */
+export type FeedSaveError =
+  | 'invalid_url'
+  | 'duplicate'
+  | 'fetch'
+  | 'parse'
+  | 'folder'
+  | 'not_found'
+
+export type FeedSaveResult =
+  | { ok: true; feedId: FeedId; urlChanged: boolean }
+  | { ok: false; reason: FeedSaveError; detail?: string; feedId?: FeedId }
+
+export type OpmlImportResult =
+  | { ok: true; imported: number; existing: number; invalid: number }
+  | { ok: false; reason: 'invalid_file' | 'too_large' }
 
 export type EntriesResult = {
   entries: EntrySummary[]

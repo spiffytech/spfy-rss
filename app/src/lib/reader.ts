@@ -61,8 +61,10 @@ export type ReaderSession = {
   expandedIds: EntryId[]
   viewModeOverride: 'expanded' | 'list' | null
   renameId: string | null
-  renameKind: 'feed' | 'category' | null
+  renameKind: 'category' | null
   renameTitle: string
+  /** Add or edit feed dialog; null = closed. One form for both operations. */
+  feedForm: { mode: 'add' | 'edit'; feedId: FeedId | null } | null
   /**
    * What the server said about rows this session has written, keyed by id.
    *
@@ -118,6 +120,7 @@ export const createReader = (filter: () => EntriesFilter) => {
     renameId: null,
     renameKind: null,
     renameTitle: '',
+    feedForm: null,
     wanted: PAGE_SIZE,
     listGen: 0,
   })
@@ -696,10 +699,28 @@ export const createReader = (filter: () => EntriesFilter) => {
     )
   }
 
-  const startRename = (id: string, kind: 'feed' | 'category', title: string): void => {
+  const openAddFeed = (): void => {
+    setSession((draft) => {
+      draft.feedForm = { mode: 'add', feedId: null }
+    })
+  }
+
+  const openEditFeed = (feedId: FeedId): void => {
+    setSession((draft) => {
+      draft.feedForm = { mode: 'edit', feedId }
+    })
+  }
+
+  const closeFeedForm = (): void => {
+    setSession((draft) => {
+      draft.feedForm = null
+    })
+  }
+
+  const startRename = (id: string, title: string): void => {
     setSession((draft) => {
       draft.renameId = id
-      draft.renameKind = kind
+      draft.renameKind = 'category'
       draft.renameTitle = title
     })
   }
@@ -720,41 +741,27 @@ export const createReader = (filter: () => EntriesFilter) => {
   }
 
   /**
-   * Rename a feed or category: optimistic in the sidebar, then the server's copy.
-   *
-   * The sidebar and the feed popover both drive this — one title, one write, one
-   * reconciliation — rather than each keeping its own editor state.
+   * Rename a folder: optimistic in the sidebar, then the server's copy. Feed
+   * titles are edited in the feed form, not here.
    */
   const saveRename = async (): Promise<void> => {
     const id = session.renameId
-    const kind = session.renameKind
     const title = session.renameTitle.trim()
-    if (id == null || kind == null || !title) return
+    if (id == null || !title) return
 
-    const saved = await runWrite('rename that', () =>
+    const saved = await runWrite('rename that folder', () =>
       action(function* () {
         // Applied inside the transition and re-produced by `refresh(panel)`.
-        // Writing the projection outside one (as this used to) has no transaction
-        // to live in, so it was discarded and the sidebar only changed once the
-        // server answered.
         setPanel((draft) => {
-          if (kind === 'feed') {
-            for (const feed of draft.allFeeds) if (feed.id === id) feed.title = title
-            for (const feed of draft.feeds) if (feed.id === id) feed.title = title
-          } else {
-            for (const category of draft.categories) if (category.id === id) category.title = title
-          }
+          for (const category of draft.categories) if (category.id === id) category.title = title
         })
-        yield kind === 'feed'
-          ? api.renameFeed(id as FeedId, title)
-          : api.renameCategory(id as CategoryId, title)
+        yield api.renameCategory(id as CategoryId, title)
         refresh(panel)
       })(),
     )
 
     // The editor is session state, not a projection: close it only once the write
-    // committed. Cancelling inside the action meant a resolved write could leave
-    // the editor open, and a rejected one could close it.
+    // committed.
     if (saved) cancelRename()
   }
 
@@ -768,6 +775,15 @@ export const createReader = (filter: () => EntriesFilter) => {
 
   const refreshPanel = (): void => {
     refresh(panel)
+  }
+
+  /** Re-read the list from the top (a feed's URL changed, entries may differ). */
+  const reloadList = (): void => {
+    setSession((draft) => {
+      draft.listGen++
+      draft.confirmed = {}
+    })
+    refresh(page)
   }
 
   // ---- idle refresh ----
@@ -829,11 +845,15 @@ export const createReader = (filter: () => EntriesFilter) => {
     ensureWindow,
     refreshFeeds,
     refreshPanel,
+    reloadList,
     setViewMode,
     setSort,
     setHideReadItems,
     toggleHideEmptyFeeds,
     toggleAutoRead,
+    openAddFeed,
+    openEditFeed,
+    closeFeedForm,
     startRename,
     cancelRename,
     setRenameTitle,

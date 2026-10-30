@@ -144,15 +144,21 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
         return trackEntry(element, entryId)
       }}
       class={[
-        'msgFrame px-3 py-2.5 border-b border-gray-200',
+        'msgFrame relative px-3 py-2.5 border-b border-gray-200',
         unread() ? 'bg-white' : 'bg-gray-50',
       ]}
       aria-expanded={showContent() ? 'true' : 'false'}
       onClick={onCardClick}
     >
+      {/* Read marker: an edge rail on the minority state. Absolutely positioned
+          so turning read on/off never shifts the card's content. */}
+      <Show when={!unread()}>
+        <span aria-hidden="true" class="absolute inset-y-0 left-0 w-[3px] bg-gray-400" />
+      </Show>
+
       <div class="msgButtons flex items-center gap-x-1 md:gap-x-2 text-xs">
         <a
-          class="mtime text-gray-500 hover:text-gray-700 p-1.5 md:p-0 min-h-[28px] flex items-center"
+          class="mtime text-gray-500 hover:text-gray-700 px-1.5 min-h-11 md:min-h-9 flex items-center"
           href={props.entry.url ?? undefined}
           target="_blank"
           rel="noreferrer"
@@ -162,21 +168,23 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
         </a>
         <button
           type="button"
-          class="text-gray-500 hover:text-gray-700 p-2 -m-1 md:p-0 md:m-0 min-w-[28px] min-h-[28px]"
+          class="entry-btn"
           title="Star (s)"
+          aria-label={props.entry.starred ? 'Unstar' : 'Star'}
           onClick={() => void toggleStar(props.entry.id)}
         >
-          <span class={props.entry.starred ? 'text-yellow-500' : ''}>
+          <span aria-hidden="true" class={props.entry.starred ? 'text-yellow-500' : ''}>
             {props.entry.starred ? '★' : '☆'}
           </span>
         </button>
         <button
           type="button"
-          class="text-gray-500 hover:text-gray-700 p-2 -m-1 md:p-0 md:m-0 min-w-[28px] min-h-[28px]"
-          title="Keep unread / mark read (m)"
+          class={['entry-btn', unread() ? 'text-gray-700' : 'text-gray-500']}
+          title={unread() ? 'Mark read (m)' : 'Mark unread (m)'}
+          aria-label={unread() ? 'Mark read' : 'Mark unread'}
           onClick={() => toggleRead(props.entry.id)}
         >
-          ◉
+          <span aria-hidden="true">{unread() ? '●' : '○'}</span>
         </button>
       </div>
 
@@ -184,7 +192,7 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
         <a
           class={[
             'msubject inline-block leading-snug font-semibold hover:underline text-lg break-words',
-            unread() ? 'text-gray-900' : 'text-gray-500',
+            unread() ? 'text-gray-900' : 'text-gray-400',
           ]}
           href={props.entry.url ?? undefined}
           target="_blank"
@@ -194,7 +202,7 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
         </a>
         <div class={['text-xs mt-1', unread() ? 'text-gray-500' : 'text-gray-400']}>
           from{' '}
-          <span class={unread() ? 'text-gray-700' : 'text-gray-500'}>
+          <span class={unread() ? 'text-gray-700' : 'text-gray-400'}>
             {props.entry.feedTitle}
           </span>
           <Show when={props.entry.author && props.entry.author !== props.entry.feedTitle}>
@@ -206,7 +214,10 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
         <Show when={mounted()}>
           <div
             ref={(element) => sinkBody(element)}
-            class="reading text-base mt-4 [&_blockquote]:my-4 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-200 [&_blockquote]:pl-4 [&_blockquote]:text-gray-500 [&_blockquote]:italic [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-4 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-4 [&_ol]:space-y-1 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_h4]:text-base [&_h5]:text-sm [&_h6]:text-xs [&_h1]:font-bold [&_h2]:font-bold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_h1]:mt-6 [&_h1]:mb-3 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:mt-4 [&_h3]:mb-1 [&_h4]:mt-3 [&_h4]:mb-1 [&_h5]:mt-3 [&_h5]:mb-1 [&_h6]:mt-3 [&_h6]:mb-1 [&_code]:bg-gray-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_table]:w-full [&_table]:border-collapse [&_table]:my-4 [&_table]:text-sm [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_figure]:my-4 [&_figcaption]:text-sm [&_figcaption]:text-gray-500 [&_figcaption]:mt-1"
+            class={[
+              'reading text-base mt-4 [&_blockquote]:my-4 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-200 [&_blockquote]:pl-4 [&_blockquote]:text-gray-500 [&_blockquote]:italic [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-4 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-4 [&_ol]:space-y-1 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_h4]:text-base [&_h5]:text-sm [&_h6]:text-xs [&_h1]:font-bold [&_h2]:font-bold [&_h3]:font-semibold [&_h4]:font-semibold [&_h5]:font-semibold [&_h6]:font-semibold [&_h1]:mt-6 [&_h1]:mb-3 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:mt-4 [&_h3]:mb-1 [&_h4]:mt-3 [&_h4]:mb-1 [&_h5]:mt-3 [&_h5]:mb-1 [&_h6]:mt-3 [&_h6]:mb-1 [&_code]:bg-gray-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.9em] [&_table]:w-full [&_table]:border-collapse [&_table]:my-4 [&_table]:text-sm [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_figure]:my-4 [&_figcaption]:text-sm [&_figcaption]:text-gray-500 [&_figcaption]:mt-1',
+              !unread() && 'reading-read',
+            ]}
           />
         </Show>
       </div>

@@ -70,6 +70,20 @@
     color: var(--color-accent);
     text-decoration: underline;
   }
+  /* Read entries mute the body the same way as the title: text drops to
+   * gray-500 (still ~4.8:1 on the gray-50 card), links keep their underline but
+   * lose the accent, and hovers restore full ink. Media keeps its color —
+   * dimming a diagram makes the article harder to read, not "done". */
+  .reading-read {
+    color: var(--color-muted);
+  }
+  .reading-read a {
+    color: oklch(44.6% 0.03 256.802); /* gray-600 */
+    text-decoration-color: oklch(70.7% 0.022 261.325); /* gray-400 */
+  }
+  .reading-read a:hover {
+    color: var(--color-ink);
+  }
   .reading hr {
     border: 0;
     border-top: 1px solid var(--color-line);
@@ -109,6 +123,16 @@
     @apply shrink-0 min-h-11 px-3 inline-flex items-center justify-center
       border border-line rounded-lg bg-white hover:bg-surface active:bg-line
       leading-none cursor-pointer;
+  }
+
+  /* Entry-row controls (star, read toggle). 44px is the touch target floor, so
+   * it holds on mobile; desktop tightens to 36px where the pointer is precise.
+   * The accent only appears on hover — resting buttons stay quiet, since most
+   * rows are unread and a wall of accent glyphs reads as noise. */
+  .entry-btn {
+    @apply shrink-0 min-h-11 min-w-11 md:min-h-9 md:min-w-9 inline-flex
+      items-center justify-center rounded-lg text-xl leading-none cursor-pointer
+      text-gray-500 hover:bg-gray-100 hover:text-accent;
   }
 
   /* One action row in the feed popover: full width and at least 44px tall, which

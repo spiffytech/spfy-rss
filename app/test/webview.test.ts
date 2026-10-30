@@ -490,7 +490,7 @@ it("reading behaviours: windowing, auto-read on scroll, and click semantics", as
     await openFeedView(view);
 
     const readState = (i: number): string =>
-      `const a = document.querySelectorAll("article")[${i}]; return a && a.className.includes("bg-gray-50") ? "read" : "unread"`;
+      `const a = document.querySelectorAll("article")[${i}]; return a && a.className.includes("bg-gray-100") ? "read" : "unread"`;
 
     // First window only (VIEW_PAGE_SIZE), and nothing is read before the user
     // has scrolled — visibility alone marks nothing (old auto-read.spec).
@@ -550,7 +550,7 @@ it("reading behaviours: windowing, auto-read on scroll, and click semantics", as
     // only toggles the fold. Use entries the scroll left below the band.
     const unreadIds = (await view.evaluate(`
         (() => [...document.querySelectorAll('article')]
-          .filter((a) => !a.className.includes('bg-gray-50'))
+          .filter((a) => !a.className.includes('bg-gray-100'))
           .slice(-2)
           .map((a) => a.getAttribute('data-entry-id')))()
       `)) as string[];
@@ -562,13 +562,13 @@ it("reading behaviours: windowing, auto-read on scroll, and click semantics", as
     );
     const linkRead = (await view.evaluate(
       until(
-        `const a = document.querySelector('[data-entry-id="${linkId}"]'); return a && a.className.includes("bg-gray-50") ? "read" : ""`,
+        `const a = document.querySelector('[data-entry-id="${linkId}"]'); return a && a.className.includes("bg-gray-100") ? "read" : ""`,
       ),
     )) as string;
     expect(linkRead).toBe("read");
 
     const cardState = (await view.evaluate(
-      `(() => { const a = document.querySelector('[data-entry-id="${cardId}"]'); return a.className.includes('bg-gray-50') ? 'read' : 'unread' })()`,
+      `(() => { const a = document.querySelector('[data-entry-id="${cardId}"]'); return a.className.includes('bg-gray-100') ? 'read' : 'unread' })()`,
     )) as string;
     console.log("link click ->", linkRead, "| card-body click state:", cardState);
     expect(cardState).toBe("unread");
@@ -1111,7 +1111,7 @@ it("a reading session raises no page faults", async () => {
     `);
     const read = (await view.evaluate(
       until(
-        `const n = [...document.querySelectorAll('[data-entry-id]')].filter((a) => a.className.includes('bg-gray-50')).length; return n > 0 ? n : 0`,
+        `const n = [...document.querySelectorAll('[data-entry-id]')].filter((a) => a.className.includes('bg-gray-100')).length; return n > 0 ? n : 0`,
       ),
     )) as number;
     expect(read).toBeGreaterThan(0);

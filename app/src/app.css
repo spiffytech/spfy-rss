@@ -70,19 +70,15 @@
     color: var(--color-accent);
     text-decoration: underline;
   }
-  /* Read entries mute the body the same way as the title: text drops to
-   * gray-500 (still ~4.8:1 on the gray-50 card), links keep their underline but
-   * lose the accent, and hovers restore full ink. Media keeps its color —
-   * dimming a diagram makes the article harder to read, not "done". */
+  /* Read entries: one shade lighter than unread, not the old gray-400/gray-500
+   * drop. Enough to register while scanning, light enough that the card you are
+   * mid-article in barely changes. Links stay underlined but go gray. */
   .reading-read {
-    color: var(--color-muted);
+    color: oklch(37.3% 0.034 259.733); /* gray-700 */
   }
   .reading-read a {
-    color: oklch(44.6% 0.03 256.802); /* gray-600 */
+    color: inherit;
     text-decoration-color: oklch(70.7% 0.022 261.325); /* gray-400 */
-  }
-  .reading-read a:hover {
-    color: var(--color-ink);
   }
   .reading hr {
     border: 0;

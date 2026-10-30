@@ -19,7 +19,7 @@ export const EntryList = () => {
   const onSentinel = (): void | Promise<void> => (pageHasMore() ? loadMore() : checkTail())
 
   return (
-    <div data-testid="entry-list" class="flex flex-col gap-y-1 pb-[100dvh]">
+    <div data-testid="entry-list" class="flex flex-col gap-y-1 px-2 md:px-0 pb-[100dvh]">
       <Show when={r.entries().length === 0}>
         <p class="text-gray-500 text-sm px-2 py-4">No entries.</p>
       </Show>

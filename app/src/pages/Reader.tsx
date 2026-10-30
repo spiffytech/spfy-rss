@@ -11,6 +11,7 @@ import { FeedPanel } from "../components/FeedPanel";
 import { Home } from "../components/Home";
 import { EntryList } from "../components/EntryList";
 import { watchScroll } from "../lib/observers";
+import { installScrollMemory } from "../lib/scroll-memory";
 import { TopToolbar } from "../components/TopToolbar";
 
 /**
@@ -63,11 +64,17 @@ export const ReaderPage = () => {
     });
     const stopIdle = r.startIdleRefresh();
     const stopScroll = watchScroll(r);
+    const stopMemory = installScrollMemory({
+      viewKey: r.viewKey,
+      wanted: () => r.session.wanted,
+      ensureWindow: r.ensureWindow,
+    });
 
     return () => {
       stopKeys();
       stopIdle();
       stopScroll();
+      stopMemory();
       mql.removeEventListener("change", onChange);
     };
   });
@@ -85,9 +92,18 @@ export const ReaderPage = () => {
   // The list is replaced in exactly two cases, and both mean "start at the top":
   // you opened a different view, or you asked for a refresh (`listGen`). Keyed on
   // those, not on a separate counter — the events are the state.
+  //
+  // Seeded with the current values because Solid runs the apply once on creation:
+  // a mount must not reset, or it overwrites the position the browser (or
+  // ./scroll-memory) just restored.
+  let lastViewKey = r.viewKey();
+  let lastGen = r.session.listGen;
   createEffect(
     () => [r.viewKey(), r.session.listGen] as const,
-    () => {
+    ([key, gen]) => {
+      if (key === lastViewKey && gen === lastGen) return;
+      lastViewKey = key;
+      lastGen = gen;
       if (scrollEl) scrollEl.scrollTop = 0;
     },
   );

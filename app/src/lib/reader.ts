@@ -553,6 +553,20 @@ export const createReader = (filter: () => EntriesFilter) => {
     if (session.atListEnd) loadMore()
   }
 
+  /**
+   * Grow the window to at least `count` rows.
+   *
+   * Used by scroll restoration: a saved position can sit past the first page,
+   * which is all a fresh load (or a restored tab) has in hand.
+   */
+  const ensureWindow = (count: number): void => {
+    if (count <= session.wanted) return
+    setSession((draft) => {
+      draft.wanted = count
+    })
+    refresh(page)
+  }
+
   // A new view means a new list. Keyed on the URL filter (a string), not on the
   // projection's value: that would re-fire on every read and loop, because the
   // reset writes the projection's own inputs.
@@ -812,6 +826,7 @@ export const createReader = (filter: () => EntriesFilter) => {
     toggleStar,
     loadMore,
     checkTail,
+    ensureWindow,
     refreshFeeds,
     refreshPanel,
     setViewMode,

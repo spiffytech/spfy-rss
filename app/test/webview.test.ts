@@ -1181,3 +1181,65 @@ it("prev/next move relative to the card in view, without waiting on a write", as
     await view.close();
   }
 }, 60_000);
+
+it("the reading pane keeps its position across a reload", async () => {
+  // The pane is an inner scroller and the document never scrolls, so the
+  // browser restores nothing after a reload (and Android WebView has the same
+  // failure for a bfcache resume). lib/scroll-memory keeps its own anchor.
+  const view = new Bun.WebView({ width: 420, height: 800 });
+  try {
+    await signIn(view);
+    restoreUnread();
+    // The list must survive the reload unchanged: the default view hides read
+    // items, and the rows auto-read on the way down would be filtered out of a
+    // reloaded window, taking the anchor entry with them (the pixel fallback is
+    // what handles that). Show read rows so the anchor is still there.
+    const prefs = openDatabase(fixtureDbPath);
+    const feed = prefs.sqlite.query("SELECT id, user_id FROM feeds LIMIT 1").get() as {
+      id: string;
+      user_id: string;
+    };
+    prefs.sqlite.run(
+      "INSERT INTO user_prefs (user_id, scope, prefs) VALUES (?, ?, ?) ON CONFLICT (user_id, scope) DO UPDATE SET prefs = excluded.prefs",
+      [feed.user_id, `feed:${feed.id}`, JSON.stringify({ hideReadItems: false })],
+    );
+    prefs.sqlite.close();
+    await openFeedView(view);
+
+    const at = `(() => {
+      const el = document.querySelector('[data-testid="entry-scroll"]')
+      const cards = [...document.querySelectorAll('[data-entry-id]')]
+      const bandTop = el.getBoundingClientRect().top + el.clientHeight * 0.15
+      const index = cards.findIndex((c) => c.getBoundingClientRect().bottom > bandTop)
+      return JSON.stringify({ index, top: Math.round(el.scrollTop) })
+    })()`;
+
+    // Start well down the list, the way the reader arrives after scrolling.
+    await view.evaluate(`
+      (() => {
+        const el = document.querySelector('[data-testid="entry-scroll"]')
+        const card = document.querySelectorAll('[data-entry-id]')[4]
+        el.scrollTop = el.scrollTop + (card.getBoundingClientRect().top - el.getBoundingClientRect().top)
+        return el.scrollTop
+      })()
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const before = JSON.parse((await view.evaluate(at)) as string) as { index: number; top: number };
+    expect(before.index).toBeGreaterThan(0);
+    expect(before.top).toBeGreaterThan(0);
+
+    await view.reload();
+    // Wait for the saved position to be re-applied (it lands after hydration).
+    const restored = (await view.evaluate(
+      until(`const el = document.querySelector('[data-testid="entry-scroll"]')
+        return el && el.scrollTop > 0 ? el.scrollTop : 0`),
+    )) as number;
+    expect(restored).toBeGreaterThan(0);
+
+    const after = JSON.parse((await view.evaluate(at)) as string) as { index: number; top: number };
+    expect(after.index).toBe(before.index);
+    expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(4);
+  } finally {
+    await view.close();
+  }
+}, 60_000);

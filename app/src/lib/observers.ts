@@ -1,6 +1,6 @@
 /**
- * Reading-pane observers: the scroll sweep (auto-read what you scrolled past) and
- * the end-of-list sentinel.
+ * Reading-pane observers: the scroll pass (mark what you scrolled past as read)
+ * and the end-of-list sentinel.
  *
  * Browser-only, and per page: they read and write the page's reader, which is
  * passed in rather than imported, so nothing here depends on ambient state.
@@ -11,50 +11,54 @@
  * programmatic scroll, and a stale answer made Prev/Next move relative to a card
  * that had already left the screen.
  */
-import { BAND_FRACTION, isScrolledPast } from '../shared/reading'
+import { READ_LINE_FRACTION, isPastReadLine } from '../shared/reading'
 import type { EntryId } from '../shared/ids'
 import { scrollRoot } from './nav'
 import type { Reader } from './reader'
 
-type Member = { el: HTMLElement; entryId: EntryId }
+type TrackedCard = { el: HTMLElement; entryId: EntryId }
 
-const members = new Set<Member>()
-let rafId: number | null = null
+const cards = new Set<TrackedCard>()
+let frame: number | null = null
 
 /** The reading pane's scroll container, from the one definition in ./nav. */
 const scrollContainer = (): HTMLElement | null => scrollRoot()
 
 /**
- * One pass over the cards: anything whose top edge has risen above the reading
- * band was scrolled past, so the sweep marks it read.
+ * One pass over the tracked cards: every card whose top edge is above the read
+ * line was scrolled past, so it is marked read.
  *
- * Call it from the scroll handler. It coalesces to one pass per frame.
+ * The pass is one animation frame, and one call: the cards it finds travel
+ * together as a single mark-read. Coalescing to the frame is what keeps a fast
+ * scroll from sending a request per card.
  */
-export const sweep = (r: Reader): void => {
-  if (rafId != null) return
-  rafId = requestAnimationFrame(() => {
-    rafId = null
-    // autoRead owns the full guard; this is just the cheapest pre-check.
+export const markScrolledPastRead = (r: Reader): void => {
+  if (frame != null) return
+  frame = requestAnimationFrame(() => {
+    frame = null
+    // canAutoRead owns the full guard; this is just the cheapest pre-check.
     if (!r.session.userHasScrolled) return
     const container = scrollContainer()
     if (!container) return
-    const containerRect = container.getBoundingClientRect()
-    const bandY = containerRect.top + containerRect.height * BAND_FRACTION
-    for (const member of [...members]) {
-      if (!member.el.isConnected) {
-        members.delete(member)
-      } else if (isScrolledPast(member.el.getBoundingClientRect(), bandY)) {
-        members.delete(member)
-        r.autoRead(member.entryId, true) // viaScroll: requires userHasScrolled
+    const rect = container.getBoundingClientRect()
+    const readLineY = rect.top + rect.height * READ_LINE_FRACTION
+    const scrolledPast: EntryId[] = []
+    for (const card of [...cards]) {
+      if (!card.el.isConnected) {
+        cards.delete(card)
+      } else if (isPastReadLine(card.el.getBoundingClientRect(), readLineY)) {
+        cards.delete(card)
+        if (r.canAutoRead(card.entryId, true)) scrolledPast.push(card.entryId)
       }
     }
+    if (scrolledPast.length > 0) r.markRead(scrolledPast)
   })
 }
 
 /**
- * The one scroll listener for the reading pane: it arms the sweep, records
- * end-of-list (which gates the idle-time tail recheck) and asks the sweep for a
- * pass. Capture on the document, because a scroll event does not bubble.
+ * The one scroll listener for the reading pane: it arms the pass, records
+ * end-of-list (which gates the idle-time tail recheck) and asks for a pass.
+ * Capture on the document, because a scroll event does not bubble.
  *
  * Returns the cleanup.
  */
@@ -64,28 +68,28 @@ export const watchScroll = (r: Reader): (() => void) => {
     if (!container) return
     // A scroll landing at scrollTop 0 is our own programmatic reset when a fresh
     // list replaces the old one — not user intent. Without this, opening a feed
-    // arms the auto-read sweep and marks its first entry read.
+    // arms the auto-read pass and marks its first entry read.
     const scrolled = container.scrollTop !== 0
     const atEnd = container.scrollTop + container.clientHeight >= container.scrollHeight - 200
     r.setSession((draft) => {
       if (scrolled) draft.userHasScrolled = true
       draft.atListEnd = atEnd
     })
-    if (scrolled) sweep(r)
+    if (scrolled) markScrolledPastRead(r)
   }
   document.addEventListener('scroll', onScroll, { capture: true, passive: true })
   return () => document.removeEventListener('scroll', onScroll, { capture: true })
 }
 
 /**
- * Track one entry card for the sweep. Call from a `ref` callback; the returned
- * function is the cleanup.
+ * Track one entry card for the scroll pass. Call from a `ref` callback; the
+ * returned function is the cleanup.
  */
-export const trackEntry = (node: HTMLElement, entryId: EntryId): (() => void) => {
-  const member: Member = { el: node, entryId }
-  members.add(member)
+export const trackCard = (node: HTMLElement, entryId: EntryId): (() => void) => {
+  const card: TrackedCard = { el: node, entryId }
+  cards.add(card)
   return () => {
-    members.delete(member)
+    cards.delete(card)
   }
 }
 

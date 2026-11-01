@@ -17,7 +17,7 @@ describe('describeWriteFailure', () => {
 
   test('falls back to what failed, without leaking the exception text', () => {
     const message = describeWriteFailure(new Error('SQLITE_BUSY: database is locked'), 'star that')
-    expect(message).toBe('Could not star that. The list has been refreshed.')
+    expect(message).toBe('Could not star that. Nothing was saved.')
     expect(message).not.toContain('SQLITE')
   })
 

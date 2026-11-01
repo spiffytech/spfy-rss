@@ -129,23 +129,22 @@ export function queryView(
   return { entries: page, nextCursor }
 }
 
+/** The only fields a mutation changes: what the client applies in place of
+ *  re-reading the window it is showing. */
+export type WrittenRow = { id: EntryId; status: 'read' | 'unread'; starred: boolean }
+
 /**
- * Re-read specific rows by id.
- *
- * `setStatus` uses this to answer with the rows it just wrote: the client applies
- * the server's copy of those rows and never re-reads the window it is showing.
+ * The mutation's answer: the rows it just wrote, without the body or the feed
+ * fields. Read state is the client's to apply; it never re-reads the window.
  */
-export function entriesByIds(
+export function writtenRows(
   db: Db,
   opts: { userId: UserId; ids: EntryId[] },
-): EntrySummary[] {
+): WrittenRow[] {
   if (opts.ids.length === 0) return []
   return db
-    .select({
-      ...entryColumns,
-    })
+    .select({ id: entries.id, status: entries.status, starred: entries.starred })
     .from(entries)
-    .innerJoin(feeds, eq(entries.feedId, feeds.id))
     .where(
       and(
         eq(entries.userId, opts.userId),
@@ -153,7 +152,7 @@ export function entriesByIds(
         sql`${entries.status} <> 'removed'`,
       ),
     )
-    .all()
+    .all() as WrittenRow[]
 }
 
 /** Sidebar snapshot: feeds, categories with totals, and per-feed unread counts. */

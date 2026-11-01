@@ -37,7 +37,7 @@ import {
   unsubscribeFeed,
 } from '../server/query/mutations'
 import {
-  entriesByIds as entriesByIdsFromDb,
+  writtenRows as writtenRowsFromDb,
   panel as panelFromDb,
   queryView,
 } from '../server/query/views'
@@ -182,33 +182,40 @@ export const viewPanel = authed(async ({ user }, currentFeed: FeedId | null) => 
 
 const entryIds = z.array(z.string()).min(1).max(500)
 
-export const setStatus = authed(
-  async ({ user }, ids: unknown, status: 'read' | 'unread') => {
-    const parsed = parse(z.object({ ids: entryIds, status: z.enum(['read', 'unread']) }), {
-      ids,
-      status,
-    })
-    const handle = db()
-    markEntries(handle, {
-      userId: user.id,
-      entryIds: parsed.ids as EntryId[],
-      status: parsed.status,
-    })
-    // Answer with the rows as stored: the client applies these instead of
-    // re-reading the window, so a mark-read cannot lose the scroll position.
-    return entriesByIdsFromDb(handle, { userId: user.id, ids: parsed.ids as EntryId[] })
-  },
-)
+/** Mark exactly these rows read. Answers with what it wrote, for the client to
+ *  apply in place — a mark-read must not re-read the window it is showing. */
+export const markRead = authed(async ({ user }, ids: unknown) => {
+  const parsed = parse(z.object({ ids: entryIds }), { ids })
+  const handle = db()
+  markEntries(handle, {
+    userId: user.id,
+    entryIds: parsed.ids as EntryId[],
+    status: 'read',
+  })
+  return writtenRowsFromDb(handle, { userId: user.id, ids: parsed.ids as EntryId[] })
+})
 
-export const setStarred = authed(async ({ user }, ids: unknown, starred: boolean) => {
-  const parsed = parse(z.object({ ids: entryIds, starred: z.boolean() }), { ids, starred })
+/** The other direction, as its own intent: the wire carries no status flag. */
+export const markUnread = authed(async ({ user }, ids: unknown) => {
+  const parsed = parse(z.object({ ids: entryIds }), { ids })
+  const handle = db()
+  markEntries(handle, {
+    userId: user.id,
+    entryIds: parsed.ids as EntryId[],
+    status: 'unread',
+  })
+  return writtenRowsFromDb(handle, { userId: user.id, ids: parsed.ids as EntryId[] })
+})
+
+export const setStar = authed(async ({ user }, id: unknown, starred: unknown) => {
+  const parsed = parse(z.object({ id: z.string().min(1), starred: z.boolean() }), { id, starred })
   const handle = db()
   setStarredInDb(handle, {
     userId: user.id,
-    entryIds: parsed.ids as EntryId[],
+    entryIds: [parsed.id as EntryId],
     starred: parsed.starred,
   })
-  return entriesByIdsFromDb(handle, { userId: user.id, ids: parsed.ids as EntryId[] })
+  return writtenRowsFromDb(handle, { userId: user.id, ids: [parsed.id as EntryId] })
 })
 const feedPatchSchema = z
   .object({

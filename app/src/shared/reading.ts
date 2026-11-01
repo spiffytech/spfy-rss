@@ -9,11 +9,11 @@ export interface TrackedRect {
 }
 
 /**
- * Height of the reading band at the top of the scroll container, as a fraction of
- * its height. One constant for both users of the band: the scroll sweep (what
- * did I scroll past?) and the keyboard anchor (what am I looking at?).
+ * Where the read line sits, as a fraction of the scroll container's height from
+ * its top. One constant for both users: the scroll pass (what did I scroll
+ * past?) and the keyboard anchor (what am I looking at?).
  */
-export const BAND_FRACTION = 0.15
+export const READ_LINE_FRACTION = 0.15
 
 /**
  * Auto-read guard: should the scroll-driven auto-read fire for this entry?
@@ -53,16 +53,15 @@ export function shouldAutoRead(opts: {
 }
 
 /**
- * Sweep guard: has the entry's top edge risen above the band line (given in
- * the same coordinate space as the rect)? The trigger is absolute — every
- * entry, short or tall, crosses the line after the same amount of scrolling,
- * because the test is on the entry's top edge, not its bottom. A pure state
- * test also can't miss the way transition observers can (mounts straddling
- * the line, crossings completed between evaluations): whatever got the entry
- * here, if its top is above the line the user scrolled it past.
+ * Has the card's top edge risen above the read line (given in the same
+ * coordinate space as the rect)? The test is absolute — every card, short or
+ * tall, passes the line after the same amount of scrolling, because it is the
+ * top edge, not the bottom. A pure state test also can't miss a card the way
+ * transition observers can (mounts straddling the line, crossings completed
+ * between evaluations): if its top is above the line, the user scrolled past it.
  */
-export function isScrolledPast(rect: TrackedRect, bandY: number): boolean {
-  return rect.top < bandY
+export function isPastReadLine(rect: TrackedRect, readLineY: number): boolean {
+  return rect.top < readLineY
 }
 
 /** Clamp a nav index into [0, length-1]; 0 when the list is empty. */

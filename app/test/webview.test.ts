@@ -1243,3 +1243,232 @@ it("the reading pane keeps its position across a reload", async () => {
     await view.close();
   }
 }, 60_000);
+
+it("a mark-read is painted while the next page is still loading", async () => {
+  // The list's derive used to fetch the next page itself, and an async derive
+  // holds the frame it runs in: while scrolling triggered a page read, a
+  // mark-read made in the same frame stayed un-grey for the whole round trip.
+  // Pages are now fetched ahead of the derive, so the paint never waits on them.
+  const view = new Bun.WebView({ width: 1100, height: 800 });
+  try {
+    await signIn(view);
+    restoreUnread();
+    await openFeedView(view);
+    await view.evaluate(until('return document.querySelectorAll("[data-entry-id]").length >= 90'));
+
+    const report = (await view.evaluate(`(async () => {
+      const el = document.querySelector('[data-testid="entry-scroll"]')
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+      const band = () => el.getBoundingClientRect().top + el.clientHeight * 0.15
+      const unread = (c) => !c.className.includes('bg-gray-100')
+
+      let pagePending = 0
+      const realFetch = window.fetch
+      window.fetch = async (...args) => {
+        const [url, init] = args
+        const body = typeof init?.body === 'string' ? init.body : ''
+        const isPage = String(url).includes('viewEntries')
+        if (isPage) pagePending++
+        if (isPage) await sleep(800)
+        try { return await realFetch(...args) } finally { if (isPage) pagePending-- }
+      }
+
+      el.scrollTop = 600
+      await sleep(400)
+
+      // Ask for the next page (the sentinel), then come back before it lands.
+      const sentinel = document.getElementById('entry-sentinel')
+      const sentinelTop = sentinel.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+      el.scrollTop = sentinelTop - el.clientHeight + 100
+      await sleep(80)
+      const inFlight = pagePending
+      el.scrollTop = 400
+      await sleep(80)
+
+      let node = null
+      for (const c of document.querySelectorAll('[data-entry-id]')) {
+        if (unread(c) && c.getBoundingClientRect().top > band() + 80) { node = c; break }
+      }
+      if (!node) return { error: 'no unread card below the band' }
+
+      let changed = null
+      const obs = new MutationObserver(() => {
+        if (changed === null && !unread(node)) changed = Math.round(performance.now() - t0)
+      })
+      obs.observe(node, { attributes: true, attributeFilter: ['class'] })
+      const t0 = performance.now()
+      el.scrollTop = el.scrollTop + (node.getBoundingClientRect().top - band() + 10)
+      await sleep(400)
+      obs.disconnect()
+      return { inFlight, latencyMs: changed, pendingWhenSettled: pagePending, endedRead: !unread(node) }
+    })()`)) as Record<string, unknown>;
+    console.log("optimistic mark during paging:", JSON.stringify(report));
+
+    expect(report.inFlight).toBeGreaterThan(0);
+    expect(report.endedRead).toBe(true);
+    // Well inside the 800ms page read: this is the paint, not the round trip.
+    expect(report.latencyMs).toBeLessThan(250);
+  } finally {
+    await view.close();
+  }
+}, 60_000);
+
+it("the counter follows the card, before the server answers", async () => {
+  // The card and the sidebar are both optimistic guesses inside the mark action.
+  // The sidebar's guess is confirmed by `refresh(panel)` landing in the same
+  // transaction, so the number must move at once and must never bounce back.
+  const view = new Bun.WebView({ width: 1100, height: 800 });
+  try {
+    await signIn(view);
+    restoreUnread();
+    await openFeedView(view);
+    await view.evaluate(until('return document.querySelectorAll("[data-entry-id]").length >= 90'));
+
+    const report = (await view.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+      const unread = (c) => !c.className.includes('bg-gray-100')
+      // The fixture feed's row: the sidebar holds feeds added by other tests.
+      const feedCount = () => {
+        for (const li of document.querySelectorAll('li')) {
+          const link = li.querySelector(':scope > a')
+          if (link && link.textContent.trim() === 'Blog') {
+            return Number(li.querySelector('[data-testid="feed-count"]')?.textContent ?? '0')
+          }
+        }
+        return -1
+      }
+
+      let writes = 0
+      let slow = 0
+      const realFetch = window.fetch
+      window.fetch = async (...args) => {
+        if (String(args[0]).includes('markRead') || String(args[0]).includes('markUnread')) {
+          writes++
+          if (slow) await sleep(slow)
+        }
+        return realFetch(...args)
+      }
+      const waitFor = async (predicate, timeout = 2000) => {
+        const start = performance.now()
+        while (performance.now() - start < timeout) {
+          if (predicate()) return Math.round(performance.now() - start)
+          await sleep(20)
+        }
+        return null
+      }
+
+      // Mark one card read, with the write deliberately slow.
+      const card = [...document.querySelectorAll('[data-entry-id]')].find(unread)
+      if (!card) return { error: 'no unread card' }
+      const before = feedCount()
+      const seen = []
+      const obs = new MutationObserver(() => seen.push(unread(card) ? 'unread' : 'read'))
+      obs.observe(card, { attributes: true, attributeFilter: ['class'] })
+
+      slow = 600
+      card.querySelector('button[aria-label="Mark read"]').click()
+      const cardMs = await waitFor(() => !unread(card))
+      const counterMs = await waitFor(() => feedCount() === before - 1)
+      await sleep(900)
+      const settled = feedCount()
+      obs.disconnect()
+
+      // Now the other direction: unread increments, again slowly.
+      const back = feedCount()
+      slow = 600
+      card.querySelector('button[aria-label="Mark unread"]').click()
+      const backCounterMs = await waitFor(() => feedCount() === back + 1)
+      const backCardMs = await waitFor(() => unread(card))
+      await sleep(900)
+
+      return {
+        before, cardMs, counterMs, backCounterMs, backCardMs,
+        settled, final: feedCount(), writes,
+        cardTransitions: seen,
+      }
+    })()`)) as Record<string, unknown>;
+    console.log("optimistic counter:", JSON.stringify(report));
+
+    expect(report.cardMs).not.toBeNull();
+    expect(report.counterMs).not.toBeNull();
+    expect(report.cardMs as number).toBeLessThan(250);
+    expect(report.counterMs as number).toBeLessThan(250);
+    expect(report.settled).toBe((report.before as number) - 1);
+    expect(report.final).toBe(report.before);
+    expect(report.backCardMs as number).toBeLessThan(250);
+    expect(report.backCounterMs as number).toBeLessThan(250);
+    // The card went read and stayed read: no revert-and-repaint at the settle.
+    expect(report.cardTransitions).toEqual(["read"]);
+  } finally {
+    await view.close();
+  }
+}, 60_000);
+
+it("a rejected mark-read puts the row and the counter back", async () => {
+  // Both the card and the sidebar are optimistic guesses. The framework owns
+  // them now, so a rejection reverts both without a manual rollback.
+  const view = new Bun.WebView({ width: 1100, height: 800 });
+  try {
+    await signIn(view);
+    restoreUnread();
+    await openFeedView(view);
+    await view.evaluate(until('return document.querySelectorAll("[data-entry-id]").length >= 90'));
+
+    const report = (await view.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+      const unread = (c) => !c.className.includes('bg-gray-100')
+      // The fixture feed's row: the sidebar holds feeds added by other tests.
+      const feedCount = () => {
+        for (const li of document.querySelectorAll('li')) {
+          const link = li.querySelector(':scope > a')
+          if (link && link.textContent.trim() === 'Blog') {
+            return Number(li.querySelector('[data-testid="feed-count"]')?.textContent ?? '0')
+          }
+        }
+        return -1
+      }
+      const waitFor = async (predicate, timeout = 3000) => {
+        const start = performance.now()
+        while (performance.now() - start < timeout) {
+          if (predicate()) return true
+          await sleep(25)
+        }
+        return false
+      }
+
+      const realFetch = window.fetch
+      window.fetch = (...args) => {
+        if (String(args[0]).includes('markRead') || String(args[0]).includes('markUnread')) {
+          return Promise.resolve(new Response('nope', { status: 500 }))
+        }
+        return realFetch(...args)
+      }
+
+      const card = [...document.querySelectorAll('[data-entry-id]')].find(unread)
+      if (!card) return { error: 'no unread card' }
+      const before = feedCount()
+
+      let becameRead = false
+      const obs = new MutationObserver(() => { if (!unread(card)) becameRead = true })
+      obs.observe(card, { attributes: true, attributeFilter: ['class'] })
+      card.querySelector('button[aria-label="Mark read"]').click()
+
+      const reverted = await waitFor(() => becameRead && unread(card))
+      const counterReverted = await waitFor(() => feedCount() === before)
+      obs.disconnect()
+      const banner = document.querySelector('[data-testid="write-error"]')
+      const message = banner ? banner.textContent : null
+      banner?.querySelector('button')?.click()
+      return { becameRead, reverted, counterReverted, message, before, after: feedCount() }
+    })()`)) as Record<string, unknown>;
+    console.log("rejected mark-read:", JSON.stringify(report));
+
+    expect(report.becameRead).toBe(true);
+    expect(report.reverted).toBe(true);
+    expect(report.counterReverted).toBe(true);
+    expect(report.after).toBe(report.before);
+    expect(String(report.message)).toContain("Could not mark that read");
+  } finally {
+    await view.close();
+  }
+}, 60_000);

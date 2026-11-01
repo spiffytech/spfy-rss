@@ -3,7 +3,7 @@ import { Show, createEffect, createSignal, untrack } from 'solid-js'
 import type { EntrySummary } from '../shared/types'
 import { READING_TIME_DISPLAY_MIN } from '../shared/prefs'
 import { timeAgo } from '../shared/util'
-import { trackEntry } from '../lib/observers'
+import { trackCard } from '../lib/observers'
 import { sinkEntryContent, transformEntryContent } from '../lib/display/render'
 import { useReader } from '../lib/reader-context'
 
@@ -19,8 +19,11 @@ import { useReader } from '../lib/reader-context'
  */
 export const EntryItem = (props: { entry: EntrySummary }) => {
   const r = useReader()
-  const { autoRead, effectiveViewMode, toggleExpanded, toggleRead, toggleStar } = r
+  const { canAutoRead, markRead, effectiveViewMode, toggleExpanded, toggleRead, toggleStar } = r
+  // The row is the display source: a mark action writes it as an optimistic
+  // guess, and the server's answer re-produces the same value at the settle.
   const unread = () => props.entry.status === 'unread'
+  const starred = () => props.entry.starred
   const isExpandedView = () => effectiveViewMode() === 'expanded'
   const showContent = () =>
     isExpandedView() || r.session.expandedIds.includes(props.entry.id)
@@ -129,9 +132,10 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
       return
     }
     // Clicking an entry is explicit: mark read even when mark-read-on-scroll is
-    // disabled for the feed, and even in list view (autoRead owns the
+    // disabled for the feed, and even in list view (canAutoRead owns the
     // keep-unread/search guards).
-    autoRead(props.entry.id, false, { ignoreFeedSetting: true, explicit: true })
+    if (canAutoRead(props.entry.id, false, { ignoreFeedSetting: true, explicit: true }))
+      markRead([props.entry.id])
   }
 
   return (
@@ -142,7 +146,7 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
         // A ref runs once per element, outside any tracking scope: the id is a
         // one-shot argument here, not a dependency of this element.
         const entryId = untrack(() => props.entry.id)
-        return trackEntry(element, entryId)
+        return trackCard(element, entryId)
       }}
       class={[
         'msgFrame relative px-3 py-2.5 border-b border-gray-200',
@@ -171,11 +175,11 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
           type="button"
           class="entry-btn"
           title="Star (s)"
-          aria-label={props.entry.starred ? 'Unstar' : 'Star'}
+          aria-label={starred() ? 'Unstar' : 'Star'}
           onClick={() => void toggleStar(props.entry.id)}
         >
-          <span aria-hidden="true" class={props.entry.starred ? 'text-yellow-500' : ''}>
-            {props.entry.starred ? '★' : '☆'}
+          <span aria-hidden="true" class={starred() ? 'text-yellow-500' : ''}>
+            {starred() ? '★' : '☆'}
           </span>
         </button>
         <button

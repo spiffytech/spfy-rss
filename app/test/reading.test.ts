@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { clampNavIndex, isScrolledPast, shouldAutoRead } from '../src/shared/reading'
+import { clampNavIndex, isPastReadLine, shouldAutoRead } from '../src/shared/reading'
 import type { EntryId, FeedId } from '../src/shared/ids'
 
 const entry = (s: string) => s as EntryId
@@ -61,29 +61,29 @@ describe('shouldAutoRead', () => {
   })
 })
 
-describe('isScrolledPast', () => {
-  // Band line at 150 in these fixtures (e.g. 15% of a 1000px root).
-  const bandY = 150
+describe('isPastReadLine', () => {
+  // Read line at 150 in these fixtures (e.g. 15% of a 1000px root).
+  const readLineY = 150
 
   test('entry whose top edge is above the line has been scrolled past', () => {
-    expect(isScrolledPast({ top: -800, bottom: -20 }, bandY)).toBe(true)
+    expect(isPastReadLine({ top: -800, bottom: -20 }, readLineY)).toBe(true)
   })
 
   test('entry fully above the line has been scrolled past', () => {
-    expect(isScrolledPast({ top: 20, bottom: 100 }, bandY)).toBe(true)
+    expect(isPastReadLine({ top: 20, bottom: 100 }, readLineY)).toBe(true)
   })
 
   test('tall entry whose top just crossed the line counts as passed', () => {
-    expect(isScrolledPast({ top: 149.9, bottom: 5000 }, bandY)).toBe(true)
+    expect(isPastReadLine({ top: 149.9, bottom: 5000 }, readLineY)).toBe(true)
   })
 
   test('entry with its top below the line has not been reached, however tall', () => {
-    expect(isScrolledPast({ top: 200, bottom: 900 }, bandY)).toBe(false)
-    expect(isScrolledPast({ top: 151, bottom: 5000 }, bandY)).toBe(false)
+    expect(isPastReadLine({ top: 200, bottom: 900 }, readLineY)).toBe(false)
+    expect(isPastReadLine({ top: 151, bottom: 5000 }, readLineY)).toBe(false)
   })
 
   test('top edge exactly on the line is not yet past', () => {
-    expect(isScrolledPast({ top: 150, bottom: 400 }, bandY)).toBe(false)
+    expect(isPastReadLine({ top: 150, bottom: 400 }, readLineY)).toBe(false)
   })
 })
 

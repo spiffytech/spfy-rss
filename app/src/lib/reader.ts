@@ -4,13 +4,16 @@
  * Three mechanisms, and nothing else:
  *
  *  - **The list is a projection**, so the first document arrives with rows (the
- *    server awaits the read) and a write can be applied optimistically.
- *  - **Paging only appends.** The derive receives the rows already on screen and
- *    asks for the missing page; `refresh` therefore never disturbs what you are
- *    reading, and a row you have read cannot vanish from under you.
- *  - **A write applies the server's copy of the rows it touched.** `setStatus`
- *    answers with them, so a mark-read costs no re-read of the window — no
- *    dirty-id bookkeeping, no reconciliation pass.
+ *    server awaits the read). Paging only appends: the derive receives the rows
+ *    already on screen and asks for the missing page, so a row you have read
+ *    cannot vanish from under you.
+ *  - **Every mutation is an action with an optimistic guess.** The card and the
+ *    sidebar show the expected value at once; the framework reverts the guess if
+ *    the write is rejected and confirms it when the server's answer lands.
+ *  - **The server's answer feeds the derive.** `markRead`, `markUnread` and
+ *    `setStar` answer with the rows they wrote. The list's derive never re-reads
+ *    them, so it re-produces from those answers and the winning guess is
+ *    confirmed rather than discarded.
  */
 import {
   action,
@@ -24,7 +27,7 @@ import {
 } from 'solid-js'
 
 import * as api from '../server/actions'
-import { BAND_FRACTION, clampNavIndex, shouldAutoRead } from '../shared/reading'
+import { READ_LINE_FRACTION, clampNavIndex, shouldAutoRead } from '../shared/reading'
 import { filterIdentity, hasView, type EntriesFilter } from '../shared/filter'
 import type { CategoryId, EntryId, FeedId } from '../shared/ids'
 import {
@@ -41,8 +44,15 @@ import { navTarget, scrollRoot, scrollToEntry } from './nav'
 /** One screenful; scrolling asks for another. */
 const PAGE_SIZE = 100
 const POLL_MS = 60_000
-/** Must match the server's `entryIds` cap in `setStatus`. */
-const STATUS_BATCH_MAX = 500
+/** Must match the server's `entryIds` cap in `markRead` / `markUnread`. */
+const WRITE_BATCH_MAX = 500
+
+/** Split a write into calls the server accepts (its zod cap). */
+const chunks = <T>(items: T[], size: number): T[][] => {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
+}
 
 type ListState = {
   entries: EntrySummary[]
@@ -56,7 +66,7 @@ type ListState = {
 export type ReaderSession = {
   userHasScrolled: boolean
   atListEnd: boolean
-  /** Rows you explicitly un-read this session: the scroll sweep must not re-read them. */
+  /** Rows you explicitly un-read this session: the scroll pass must not re-read them. */
   keepUnreadIds: EntryId[]
   expandedIds: EntryId[]
   viewModeOverride: 'expanded' | 'list' | null
@@ -66,24 +76,17 @@ export type ReaderSession = {
   /** Add or edit feed dialog; null = closed. One form for both operations. */
   feedForm: { mode: 'add' | 'edit'; feedId: FeedId | null } | null
   /**
-   * What the server said about rows this session has written, keyed by id.
+   * Read state the server answered with, keyed by id, for the list's derive.
    *
-   * This is not a copy of the list: it is the only way the list's derive can
-   * produce the truth about a row it never re-reads (the derive appends pages and
-   * leaves existing rows alone). Without it a mark-read flips optimistically and
-   * then reverts at commit, while the database has it right — silent divergence.
-   * Only the two fields a write changes are kept.
+   * The list's derive never re-reads a row, so a mutation's answer has to be an
+   * input it can reproduce; otherwise the winning guess would be discarded at
+   * commit and the row would flip back. Written only by mark-read / mark-unread.
    */
-  confirmed: Record<EntryId, { status: 'read' | 'unread'; starred: boolean }>
+  serverReadStatus: Record<EntryId, 'read' | 'unread'>
+  /** The same, for the star: written only by `setStar`. */
+  serverStarred: Record<EntryId, boolean>
   /** Has navigation moved past the card the list opened on? */
   navStarted: boolean
-  /**
-   * A local answer for a feed's unread count, and the server number it was based
-   * on. Used only while the server still reports that number: as soon as its count
-   * differs, the count is the server's again. That is what makes marking entries
-   * read move the sidebar at once without a cache to invalidate.
-   */
-  counterGuess: Record<FeedId, { basedOn: number; value: number }>
   /** Rows to hold; grows as you scroll. */
   wanted: number
   /** Bumped to ask the list to start over from the newest row. */
@@ -101,7 +104,7 @@ const statusOf = (error: unknown): number | null => {
 export const describeWriteFailure = (error: unknown, what: string): string => {
   if (statusOf(error) === 401) return 'Your session expired. Sign in again to keep saving.'
   if (statusOf(error) === 403) return `You cannot ${what}.`
-  return `Could not ${what}. The list has been refreshed.`
+  return `Could not ${what}. Nothing was saved.`
 }
 
 /** The RPC boundary takes JSON: hand it plain data, never a store proxy. */
@@ -114,8 +117,8 @@ export const createReader = (filter: () => EntriesFilter) => {
     keepUnreadIds: [],
     expandedIds: [],
     viewModeOverride: null,
-    confirmed: {},
-    counterGuess: {},
+    serverReadStatus: {},
+    serverStarred: {},
     navStarted: false,
     renameId: null,
     renameKind: null,
@@ -134,6 +137,26 @@ export const createReader = (filter: () => EntriesFilter) => {
 
   // ---- server data ----
   /**
+   * A page fetched ahead of the list.
+   *
+   * The derive must not be the one waiting on the network: an async derive holds
+   * the frame it runs in until it lands, so a mark-read made while the next page
+   * was in flight stayed un-grey for the whole round trip. `loadMore` fetches
+   * outside the derive; the derive only consumes what is already here and so
+   * stays synchronous after the first page.
+   */
+  let prefetched: { entries: EntrySummary[]; nextCursor: ViewCursor | null; from: string } | null = null
+  let prefetching = false
+  let prefetchToken = 0
+  const cursorKey = (cursor: ViewCursor | null): string => (cursor ? JSON.stringify(cursor) : '')
+  /** A reset (new view, re-read from the top) must not consume or block on an old page. */
+  const resetPrefetch = (): void => {
+    prefetchToken++
+    prefetching = false
+    prefetched = null
+  }
+
+  /**
    * The list, as a projection in its *draft* form: the derive receives what is
    * already on screen and appends only the page it does not have.
    */
@@ -144,9 +167,10 @@ export const createReader = (filter: () => EntriesFilter) => {
       const key = viewKey()
       const wanted = session.wanted
       const gen = session.listGen
-      // A plain copy, taken before the first await: a store read after one sees
+      // Plain copies, taken before the first await: a store read after one sees
       // the snapshot from when the compute started.
-      const confirmed = { ...session.confirmed }
+      const serverReadStatus = { ...session.serverReadStatus }
+      const serverStarred = { ...session.serverStarred }
       // No view (the home page) means no window to read: asking would be a
       // request for entries with no filter, which the server refuses.
       if (!hasView(filter())) {
@@ -169,23 +193,25 @@ export const createReader = (filter: () => EntriesFilter) => {
         draft.nextCursor = first.nextCursor
       } else {
         while (draft.entries.length < wanted && draft.nextCursor) {
+          const ahead =
+            prefetched && prefetched.from === cursorKey(draft.nextCursor) ? prefetched : null
+          if (ahead) {
+            prefetched = null
+            draft.entries.push(...snapshot(ahead.entries))
+            draft.nextCursor = ahead.nextCursor
+            continue
+          }
           const next = await api.viewEntries(wire(filter()), wire(draft.nextCursor))
           draft.entries.push(...snapshot(next.entries))
           draft.nextCursor = next.nextCursor
         }
       }
-      // What this session's writes changed, per row.
-      const written = Object.values(confirmed)
-      if (written.length > 0) {
-        const byId = new Map(
-          Object.entries(confirmed).map(([id, patch]) => [id as EntryId, patch]),
-        )
-        for (const row of draft.entries) {
-          const patch = byId.get(row.id)
-          if (!patch) continue
-          row.status = patch.status
-          row.starred = patch.starred
-        }
+      // What the server answered for rows this session wrote. The derive never
+      // re-reads them, so this is how it re-produces the write.
+      for (const row of draft.entries) {
+        const status = serverReadStatus[row.id]
+        if (status) row.status = status
+        if (row.id in serverStarred) row.starred = serverStarred[row.id]!
       }
     },
     { entries: [], nextCursor: null, viewKey: '', gen: 0 },
@@ -235,26 +261,13 @@ export const createReader = (filter: () => EntriesFilter) => {
     return 'Home'
   }
 
-  /** This feed's unread count: the server's, unless a local guess is still fresh. */
-  const counterFor = (feedId: FeedId): number => {
-    const server = panel.counters[feedId] ?? 0
-    const guess = session.counterGuess[feedId]
-    return guess && guess.basedOn === server ? guess.value : server
-  }
-
-  /** All counters with local guesses applied, for callers that sum several feeds. */
-  const counters = (): Record<string, number> => {
-    const server = panel.counters
-    if (Object.keys(session.counterGuess).length === 0) return server
-    const merged: Record<string, number> = { ...server }
-    for (const feed of panel.feeds) merged[feed.id] = counterFor(feed.id)
-    return merged
-  }
+  /** This feed's unread count, as the sidebar shows it. */
+  const counterFor = (feedId: FeedId): number => panel.counters[feedId] ?? 0
 
   const unreadCount = (): number | null => {
     const active = filter()
     if (!active.feedId && !active.categoryId && !active.starred && !active.search) return null
-    return computeUnreadCount(active, panel.feeds, counters())
+    return computeUnreadCount(active, panel.feeds, panel.counters)
   }
 
   const favoriteFeeds = () =>
@@ -277,11 +290,8 @@ export const createReader = (filter: () => EntriesFilter) => {
   const [writeError, setWriteError] = createSignal<string | null>(null)
 
   /**
-   * Run a write and, if it is rejected, say so and put the screen back on truth.
-   *
-   * There is no compensation to write: the framework already discarded the
-   * optimistic layer, so all that is left is telling the reader what happened and
-   * re-reading — which is also what clears a stale row from the list.
+   * Run a write. A rejection is reported; the optimistic guesses are already
+   * back where they were, because those belong to the framework.
    */
   const runWrite = async (what: string, work: () => Promise<unknown>): Promise<boolean> => {
     try {
@@ -290,11 +300,6 @@ export const createReader = (filter: () => EntriesFilter) => {
       return true
     } catch (error) {
       setWriteError(describeWriteFailure(error, what))
-      setSession((draft) => {
-        draft.counterGuess = {}
-      })
-      refresh(page)
-      refresh(panel)
       return false
     }
   }
@@ -303,112 +308,94 @@ export const createReader = (filter: () => EntriesFilter) => {
     setWriteError(null)
   }
 
-  /**
-   * Record what a write changed, then let the list re-produce itself.
-   *
-   * A projection's value at commit comes from its derive, not from the write, so
-   * the derive has to be able to produce the truth. With the rows already on
-   * screen it fetches nothing, so this reconciles without a read.
-   */
-  const confirm = (writes: { id: EntryId; status: 'read' | 'unread'; starred: boolean }[]): void => {
-    setSession((draft) => {
-      for (const write of writes) draft.confirmed[write.id] = { status: write.status, starred: write.starred }
-    })
-    refresh(page)
+  /** The rows a mark would actually change: present, deduped, not already there. */
+  const writable = (entryIds: EntryId[], status: 'read' | 'unread'): EntrySummary[] => {
+    const seen = new Set<EntryId>()
+    const rows: EntrySummary[] = []
+    for (const id of entryIds) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      const entry = entries().find((candidate) => candidate.id === id)
+      if (entry && entry.status !== status) rows.push(entry)
+    }
+    return rows
   }
 
-  /**
-   * Read marks waiting to be sent.
-   *
-   * A scroll sweep marks several entries in one frame, so they travel together —
-   * but only until the end of the tick they were marked in, not on a timer. Nothing
-   * is ever held: by the time the browser paints, the request is already out.
-   */
-  const pending = new Map<EntryId, 'read' | 'unread'>()
-  let flushQueued = false
-
-  const flushStatus = (): void => {
-    flushQueued = false
-    if (pending.size === 0) return
-    const batch = [...pending]
-    const reads: EntryId[] = []
-    const unreads: EntryId[] = []
-    for (const [id, status] of batch) (status === 'read' ? reads : unreads).push(id)
-    pending.clear()
-
-    void runWrite(reads.length > 0 ? 'mark that read' : 'mark that unread', async () => {
-      // The server answers with the rows it wrote: remember what it changed, then
-      // let the list re-produce itself from that.
-      // The endpoint accepts 500 ids per call. Mark-all on a long scroll can hold
-      // more than that, and used to fail the whole batch with a 400.
-      const chunks = <T>(items: T[]): T[][] => {
-        const out: T[][] = []
-        for (let i = 0; i < items.length; i += STATUS_BATCH_MAX) {
-          out.push(items.slice(i, i + STATUS_BATCH_MAX))
-        }
-        return out
-      }
-      const rows = await action(function* () {
-        const written: Awaited<ReturnType<typeof api.setStatus>> = []
-        for (const chunk of chunks(reads)) written.push(...snapshot(yield api.setStatus(chunk, 'read')))
-        for (const chunk of chunks(unreads)) {
-          written.push(...snapshot(yield api.setStatus(chunk, 'unread')))
-        }
-        return written
-      })()
-      confirm(
-        rows
-          .filter((row) => row.status === "read" || row.status === "unread")
-          .map((row) => ({ id: row.id, status: row.status as "read" | "unread", starred: row.starred })),
-      )
-      // One re-read per burst (the batch is already coalesced), so the sidebar
-      // settles on the server's numbers as soon as the write comes back — which is
-      // also what expires the local guesses.
-      refresh(panel)
-    })
-  }
-
-  /**
-   * Mark entries read (or unread): visible at once, sent once per burst.
-   *
-   * The visible part is a write to `confirmed` plus a refresh, which is *not* an
-   * optimistic write — it is the value the derive produces, so it survives. (A
-   * projection write here, outside any action, has no transaction to live in and
-   * is discarded: that is why the row used to grey out only when the batch came
-   * back.)
-   */
-  const setStatus = (entryIds: EntryId[], status: 'read' | 'unread'): void => {
-    if (entryIds.length === 0) return
-    const writes: { id: EntryId; status: 'read' | 'unread'; starred: boolean }[] = []
+  /** How a mark moves each affected feed's unread count. */
+  const counterDeltas = (rows: EntrySummary[], delta: 1 | -1): Map<FeedId, number> => {
     const deltas = new Map<FeedId, number>()
-    for (const entryId of entryIds) {
-      const entry = entries().find((candidate) => candidate.id === entryId)
-      if (!entry || entry.status === status) continue
-      writes.push({ id: entryId, status, starred: entry.starred })
-      deltas.set(entry.feedId, (deltas.get(entry.feedId) ?? 0) + (status === 'read' ? -1 : 1))
-      pending.set(entryId, status)
-    }
-    if (writes.length === 0) return
-    // The sidebar follows the same click, as a guess tied to the number it was
-    // based on (see counterGuess). Accumulated per feed and read back from this
-    // draft, because several marks land in one tick and each has to build on the
-    // last: reading the store here would see the value from before the tick.
-    setSession((draft) => {
+    for (const row of rows) deltas.set(row.feedId, (deltas.get(row.feedId) ?? 0) + delta)
+    return deltas
+  }
+
+  const guessReadStatus = (ids: Set<EntryId>, status: 'read' | 'unread'): void => {
+    setPage((draft) => {
+      for (const row of draft.entries) if (ids.has(row.id)) row.status = status
+    })
+  }
+
+  const guessCounters = (deltas: Map<FeedId, number>): void => {
+    setPanel((draft) => {
       for (const [feedId, delta] of deltas) {
-        const basedOn = panel.counters[feedId] ?? 0
-        const current = draft.counterGuess[feedId]
-        const base = current && current.basedOn === basedOn ? current.value : basedOn
-        draft.counterGuess = {
-          ...draft.counterGuess,
-          [feedId]: { basedOn, value: Math.max(0, base + delta) },
-        }
+        const next = (draft.counters[feedId] ?? 0) + delta
+        draft.counters[feedId] = Math.max(0, next)
       }
     })
-    confirm(writes)
-    if (!flushQueued) {
-      flushQueued = true
-      queueMicrotask(flushStatus)
-    }
+  }
+
+  /**
+   * Mark these read.
+   *
+   * The card and the sidebar move now. The server's answer lands inside the same
+   * transaction, which is what makes the guesses confirmed rather than reverted:
+   * the list's derive never re-reads a row, so the answer is how it reproduces
+   * the write.
+   */
+  const markRead = (entryIds: EntryId[]): void => {
+    const rows = writable(entryIds, 'read')
+    if (rows.length === 0) return
+    const ids = new Set(rows.map((row) => row.id))
+    const deltas = counterDeltas(rows, -1)
+
+    void runWrite('mark that read', () =>
+      action(async function* () {
+        guessReadStatus(ids, 'read')
+        guessCounters(deltas)
+
+        const written: Awaited<ReturnType<typeof api.markRead>> = []
+        for (const chunk of chunks([...ids], WRITE_BATCH_MAX)) {
+          written.push(...snapshot(yield api.markRead(chunk)))
+        }
+        setSession((draft) => {
+          for (const row of written) draft.serverReadStatus[row.id] = row.status
+        })
+        yield Promise.all([refresh(page), refresh(panel)])
+      })(),
+    )
+  }
+
+  /** Mark these unread: the same shape, in the other direction. */
+  const markUnread = (entryIds: EntryId[]): void => {
+    const rows = writable(entryIds, 'unread')
+    if (rows.length === 0) return
+    const ids = new Set(rows.map((row) => row.id))
+    const deltas = counterDeltas(rows, 1)
+
+    void runWrite('mark that unread', () =>
+      action(async function* () {
+        guessReadStatus(ids, 'unread')
+        guessCounters(deltas)
+
+        const written: Awaited<ReturnType<typeof api.markUnread>> = []
+        for (const chunk of chunks([...ids], WRITE_BATCH_MAX)) {
+          written.push(...snapshot(yield api.markUnread(chunk)))
+        }
+        setSession((draft) => {
+          for (const row of written) draft.serverReadStatus[row.id] = row.status
+        })
+        yield Promise.all([refresh(page), refresh(panel)])
+      })(),
+    )
   }
 
   const toggleRead = (entryId: EntryId): void => {
@@ -420,35 +407,37 @@ export const createReader = (filter: () => EntriesFilter) => {
         draft.keepUnreadIds.push(entryId)
       if (next === 'read') draft.keepUnreadIds = draft.keepUnreadIds.filter((id) => id !== entryId)
     })
-    setStatus([entryId], next)
+    if (next === 'read') markRead([entryId])
+    else markUnread([entryId])
   }
 
-  const autoRead = (
+  /**
+   * May this entry be marked read automatically?
+   *
+   * The policy only; the caller decides what to do with the answer. The scroll
+   * pass collects the ids that pass it into one call.
+   */
+  const canAutoRead = (
     entryId: EntryId,
     viaScroll = false,
     opts: { ignoreFeedSetting?: boolean; explicit?: boolean } = {},
-  ): void => {
+  ): boolean => {
     // Never auto-read during a search — scrolling results shouldn't mark matches.
-    if (filter().search) return
+    if (filter().search) return false
     const entry = entries().find((candidate) => candidate.id === entryId)
-    if (!entry || entry.status === 'read') return
+    if (!entry || entry.status === 'read') return false
     const feedPrefs = currentFeedId() ? panel.feedPrefs[currentFeedId()!] : undefined
-    if (
-      !shouldAutoRead({
-        viewMode: session.viewModeOverride ?? feedPrefs?.viewMode ?? DEFAULT_VIEW_MODE,
-        userHasScrolled: viaScroll ? session.userHasScrolled : true,
-        disabledAutoReadFeeds: (panel.userPrefs.disabledAutoReadFeeds ?? []) as FeedId[],
-        keepUnreadIds: session.keepUnreadIds,
-        feedId: entry.feedId,
-        entryId,
-        status: 'unread',
-        ignoreFeedSetting: opts.ignoreFeedSetting,
-        explicit: opts.explicit,
-      })
-    ) {
-      return
-    }
-    setStatus([entryId], 'read')
+    return shouldAutoRead({
+      viewMode: session.viewModeOverride ?? feedPrefs?.viewMode ?? DEFAULT_VIEW_MODE,
+      userHasScrolled: viaScroll ? session.userHasScrolled : true,
+      disabledAutoReadFeeds: (panel.userPrefs.disabledAutoReadFeeds ?? []) as FeedId[],
+      keepUnreadIds: session.keepUnreadIds,
+      feedId: entry.feedId,
+      entryId,
+      status: 'unread',
+      ignoreFeedSetting: opts.ignoreFeedSetting,
+      explicit: opts.explicit,
+    })
   }
 
   const toggleExpanded = (entryId: EntryId): void => {
@@ -461,25 +450,26 @@ export const createReader = (filter: () => EntriesFilter) => {
     setSession((draft) => {
       draft.expandedIds.push(entryId)
     })
-    autoRead(entryId, false, { ignoreFeedSetting: true, explicit: true })
+    if (canAutoRead(entryId, false, { ignoreFeedSetting: true, explicit: true })) markRead([entryId])
   }
 
   /**
-   * Index of the card at the top of the reading band, read from the DOM.
+   * Index of the card at the top of the reading pane, read from the DOM.
    *
    * Geometry, not an observer: the same question j/k answers ("what am I looking
-   * at?") and the same line the scroll sweep uses, so the keys and the sweep can
-   * never disagree about which card is current.
+   * at?") and the same read line the scroll pass uses, so the keys and the pass
+   * can never disagree about which card is current.
    */
   const anchorIndex = (): number => {
     const container = scrollRoot()
     const list = entries()
     if (!container) return 0
-    const bandTop = container.getBoundingClientRect().top + container.clientHeight * BAND_FRACTION
+    const readLineY =
+      container.getBoundingClientRect().top + container.clientHeight * READ_LINE_FRACTION
     for (let index = 0; index < list.length; index++) {
       const element = document.getElementById(`entry-${list[index]!.id}`)
       if (!element) continue
-      if (element.getBoundingClientRect().bottom > bandTop) return index
+      if (element.getBoundingClientRect().bottom > readLineY) return index
     }
     return list.length - 1
   }
@@ -515,14 +505,14 @@ export const createReader = (filter: () => EntriesFilter) => {
     setSession((draft) => {
       draft.navStarted = true
     })
-    autoRead(nextId)
+    if (canAutoRead(nextId)) markRead([nextId])
   }
 
   const markDisplayed = (): void => {
     const unread = entries()
       .filter((entry) => entry.status !== 'read')
       .map((entry) => entry.id)
-    setStatus(unread, 'read')
+    markRead(unread)
   }
 
   const toggleStar = (entryId: EntryId): void => {
@@ -530,27 +520,52 @@ export const createReader = (filter: () => EntriesFilter) => {
     if (!entry) return
     const next = !entry.starred
     const what = next ? 'star that' : 'unstar that'
-    void runWrite(what, async () => {
-      const rows = await action(function* () {
+    void runWrite(what, () =>
+      action(async function* () {
         setPage((draft) => {
           const target = draft.entries.find((candidate) => candidate.id === entryId)
           if (target) target.starred = next
         })
-        return snapshot(yield api.setStarred([entryId], next))
-      })()
-      confirm(rows)
-    })
+        const written = snapshot(yield api.setStar(entryId, next))
+        setSession((draft) => {
+          for (const row of written) draft.serverStarred[row.id] = row.starred
+        })
+        yield refresh(page)
+      })(),
+    )
   }
 
   // ---- paging ----
 
-  /** Scroll further: the derive appends one more page. */
+  /**
+   * Scroll further: fetch the next page now, and grow the window only once it is
+   * here. Fetching inside the derive instead held the frame — and every mark-read
+   * in it — until the page landed.
+   */
   const loadMore = (): void => {
-    if (!page.nextCursor) return
-    setSession((draft) => {
-      draft.wanted += PAGE_SIZE
-    })
-    refresh(page)
+    const cursor = page.nextCursor
+    if (!cursor) return
+    // A page fetched for a tail that has since changed is useless.
+    if (prefetched && prefetched.from !== cursorKey(cursor)) prefetched = null
+    // Already fetched or fetching: nothing to ask for.
+    if (prefetching || prefetched) return
+    const token = prefetchToken
+    prefetching = true
+    void api.viewEntries(wire(filter()), wire(cursor)).then(
+      (next) => {
+        if (token !== prefetchToken) return
+        prefetching = false
+        prefetched = { entries: next.entries, nextCursor: next.nextCursor, from: cursorKey(cursor) }
+        // Only now does the window grow, and the derive appends without waiting.
+        setSession((draft) => {
+          draft.wanted += PAGE_SIZE
+        })
+        refresh(page)
+      },
+      () => {
+        if (token === prefetchToken) prefetching = false
+      },
+    )
   }
 
   const checkTail = (): void => {
@@ -575,6 +590,7 @@ export const createReader = (filter: () => EntriesFilter) => {
   // projection's value: that would re-fire on every read and loop, because the
   // reset writes the projection's own inputs.
   createEffect(viewKey, () => {
+    resetPrefetch()
     setSession((draft) => {
       draft.userHasScrolled = false
       // Write only what changes: a fresh `[]` invalidates the list's derive,
@@ -584,7 +600,8 @@ export const createReader = (filter: () => EntriesFilter) => {
       draft.viewModeOverride = null
       draft.wanted = PAGE_SIZE
       draft.atListEnd = false
-      draft.confirmed = {}
+      draft.serverReadStatus = {}
+      draft.serverStarred = {}
       draft.navStarted = false
       draft.listGen = 0
     })
@@ -761,9 +778,11 @@ export const createReader = (filter: () => EntriesFilter) => {
 
   /** Re-read the list from the top (a feed's URL changed, entries may differ). */
   const reloadList = (): void => {
+    resetPrefetch()
     setSession((draft) => {
       draft.listGen++
-      draft.confirmed = {}
+      draft.serverReadStatus = {}
+      draft.serverStarred = {}
     })
     refresh(page)
   }
@@ -816,11 +835,12 @@ export const createReader = (filter: () => EntriesFilter) => {
     toggleFavorite,
     toggleRead,
     toggleExpanded,
-    autoRead,
+    canAutoRead,
     moveAndRead,
     currentEntryId,
     markDisplayed,
-    setStatus,
+    markRead,
+    markUnread,
     toggleStar,
     loadMore,
     checkTail,

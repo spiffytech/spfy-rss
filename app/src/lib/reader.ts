@@ -188,31 +188,41 @@ export const createReader = (filter: () => EntriesFilter) => {
         draft.entries = []
         draft.nextCursor = null
       }
-      if (draft.entries.length === 0) {
-        const first = await api.viewEntries(wire(filter()), null)
-        draft.entries = snapshot(first.entries)
-        draft.nextCursor = first.nextCursor
-      } else {
-        while (draft.entries.length < wanted && draft.nextCursor) {
-          const ahead =
-            prefetched && prefetched.from === cursorKey(draft.nextCursor) ? prefetched : null
-          if (ahead) {
-            prefetched = null
-            draft.entries.push(...snapshot(ahead.entries))
-            draft.nextCursor = ahead.nextCursor
-            continue
-          }
-          const next = await api.viewEntries(wire(filter()), wire(draft.nextCursor))
-          draft.entries.push(...snapshot(next.entries))
-          draft.nextCursor = next.nextCursor
-        }
-      }
       // What the server answered for rows this session wrote. The derive never
-      // re-reads them, so this is how it re-produces the write.
+      // re-reads them, so this is how it re-produces the write. Applied before
+      // the first await: from there on the derive must not read the draft.
       for (const row of draft.entries) {
         const status = serverReadStatus[row.id]
         if (status) row.status = status
         if (row.id in serverStarred) row.starred = serverStarred[row.id]!
+      }
+      // The window's rows, and how many: read once, before the first await. The
+      // draft's own keys are this derive's output, not dependencies, and a read
+      // of them after an await is untracked state (UNTRACKED_READ_AFTER_AWAIT).
+      const rows = draft.entries
+      let count = rows.length
+      let cursor = wire(draft.nextCursor)
+      if (count === 0) {
+        const first = await api.viewEntries(wire(filter()), null)
+        draft.entries = snapshot(first.entries)
+        draft.nextCursor = first.nextCursor
+      } else {
+        while (count < wanted && cursor) {
+          const ahead = prefetched && prefetched.from === cursorKey(cursor) ? prefetched : null
+          if (ahead) {
+            prefetched = null
+            rows.push(...snapshot(ahead.entries))
+            draft.nextCursor = ahead.nextCursor
+            cursor = wire(ahead.nextCursor)
+            count += ahead.entries.length
+            continue
+          }
+          const next = await api.viewEntries(wire(filter()), wire(cursor))
+          rows.push(...snapshot(next.entries))
+          draft.nextCursor = next.nextCursor
+          cursor = wire(next.nextCursor)
+          count += next.entries.length
+        }
       }
     },
     { entries: [], nextCursor: null, viewKey: '', gen: 0 },

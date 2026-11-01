@@ -11,8 +11,10 @@ declare module '@solidjs/web' {
   }
 }
 
-/** The only page an anonymous visitor may see. */
+/** The only pages an anonymous visitor may see. */
 const LOGIN_PATH = '/login'
+const SIGNUP_PATH = '/signup'
+const PUBLIC_PATHS = new Set([LOGIN_PATH, SIGNUP_PATH])
 
 /** Paths the handler must answer itself, whatever the visitor's state. */
 const isServerFunction = (path: string) => path === '/_server' || path.startsWith('/_server/')
@@ -31,7 +33,7 @@ const legacyRedirect = (url: URL, isDocument: boolean): string | null => {
     const q = url.searchParams.get('q') ?? ''
     return q === '' ? '/' : `/?search=${encodeURIComponent(q)}`
   }
-  if (url.pathname !== '/' && url.pathname !== LOGIN_PATH) return '/'
+  if (url.pathname !== '/' && url.pathname !== LOGIN_PATH && url.pathname !== SIGNUP_PATH) return '/'
   return null
 }
 
@@ -61,10 +63,10 @@ export default (async (event, next) => {
     legacyRedirect(url, request.headers.get('accept')?.includes('text/html') ?? false) ??
     // The auth gate. `/_server` is never redirected: the server-function
     // runtime answers each call and every export gates itself.
-    (!event.locals.user && url.pathname !== LOGIN_PATH && !isServerFunction(url.pathname)
+    (!event.locals.user && !PUBLIC_PATHS.has(url.pathname) && !isServerFunction(url.pathname)
       ? LOGIN_PATH
       : null) ??
-    (event.locals.user && url.pathname === LOGIN_PATH ? '/' : null)
+    (event.locals.user && PUBLIC_PATHS.has(url.pathname) ? '/' : null)
 
   if (redirect) {
     const response = new Response(null, { status: 302, headers: { location: redirect } })

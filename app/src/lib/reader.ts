@@ -226,6 +226,7 @@ export const createReader = (filter: () => EntriesFilter) => {
 
   const currentTitle = (): string => {
     const active = filter()
+    if (active.search) return `Search: ${active.search}`
     if (active.feedId) {
       const feed = panel.allFeeds.find((candidate) => candidate.id === active.feedId)
       return feed?.title ?? 'Feed'
@@ -591,25 +592,6 @@ export const createReader = (filter: () => EntriesFilter) => {
 
   // ---- writes that change the view ----
 
-  /**
-   * Ask the server to poll this view's feeds now, then re-read.
-   *
-   * The button is called "Refresh feeds": re-reading the database without telling
-   * the scheduler to fetch was a local reload wearing that label. The fetch itself
-   * happens on the scheduler's next tick (≤60s), so this only *requests* it.
-   */
-  const refreshFeeds = async (): Promise<void> => {
-    await runWrite('refresh those feeds', () => api.refresh(wire(filter())))
-    // New entries arrive at the top; the draft only appends, so ask it to start
-    // over rather than expecting a refresh to reveal them.
-    setSession((draft) => {
-      draft.listGen++
-      draft.confirmed = {}
-    })
-    refresh(page)
-    refresh(panel)
-  }
-
   const setViewMode = (viewMode: 'expanded' | 'list'): void => {
     setSession((draft) => {
       draft.viewModeOverride = viewMode
@@ -843,7 +825,6 @@ export const createReader = (filter: () => EntriesFilter) => {
     loadMore,
     checkTail,
     ensureWindow,
-    refreshFeeds,
     refreshPanel,
     reloadList,
     setViewMode,

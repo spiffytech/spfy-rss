@@ -84,6 +84,7 @@ export const TopToolbar = (props: { onToggleSidebar: () => void; reading: boolea
       </Show>
 
       <input
+        id="reader-search"
         type="search"
         placeholder="Search…"
         class="hidden md:block flex-1 max-w-sm min-w-[100px] min-h-11 px-3 py-2 border border-line rounded-lg"

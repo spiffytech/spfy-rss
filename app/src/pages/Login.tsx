@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js'
+import { Show, createSignal, onSettled } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 
 import * as api from '../server/actions'
@@ -14,6 +14,14 @@ export const LoginPage = () => {
   const [password, setPassword] = createSignal('')
   const [error, setError] = createSignal('')
   const [submitting, setSubmitting] = createSignal(false)
+  const [signupEnabled, setSignupEnabled] = createSignal(false)
+
+  onSettled(() => {
+    api
+      .signupConfig()
+      .then((config) => setSignupEnabled(config.enabled))
+      .catch(() => setSignupEnabled(false))
+  })
 
   const onSubmit = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault()
@@ -99,6 +107,12 @@ export const LoginPage = () => {
         >
           Sign in
         </button>
+
+        <Show when={signupEnabled()}>
+          <a href="/signup" class="text-center text-sm text-gray-500 hover:text-gray-700">
+            Need an account? Sign up
+          </a>
+        </Show>
       </form>
     </main>
   )

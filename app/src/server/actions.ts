@@ -4,12 +4,13 @@
  * Every read and every mutation the reader performs, as typed RPC.
  *
  * Two rules hold for this file:
- *  - nothing is exported without `authed()` except the three session functions,
- *    because `/_server` is a public endpoint;
+ *  - nothing is exported without `authed()` except the session functions
+ *    (login, logout, register) and the signup-config probe, because `/_server`
+ *    is a public endpoint;
  *  - arguments are validated with zod, because a typed signature says nothing
  *    about what the wire actually carried.
  */
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import {
@@ -25,7 +26,7 @@ import {
   verifyLogin,
 } from '../server/auth'
 import { appDb } from '../server/db-app'
-import { categories, feeds } from '../server/db/schema'
+import { categories, users } from '../server/db/schema'
 import {
   getAllFeedPrefs,
   getUserPrefs,
@@ -40,7 +41,7 @@ import {
   panel as panelFromDb,
   queryView,
 } from '../server/query/views'
-import { epochMs, type CategoryId, type EntryId, type FeedId } from '../shared/ids'
+import { epochMs, newUserId, type CategoryId, type EntryId, type FeedId } from '../shared/ids'
 import { zodEntriesFilter, type EntriesFilter } from '../shared/filter'
 import { DEFAULT_HIDE_EMPTY_FEEDS, resolveViewFilter, type FeedPrefs, type UserPrefs } from '../shared/prefs'
 import { editFeed as editFeedInDb, subscribe as subscribeFeed } from '../server/fetch/subscribe'
@@ -67,6 +68,56 @@ export const logout = guarded(async () => {
   cookieJar().delete(SESSION_COOKIE)
   requestEvent().locals.user = null
   return { authenticated: false as const }
+})
+
+/** Is self-service registration open? Read per call so a restart alone isn't
+ *  required to flip it in tests; env is still the only source. */
+const signupEnabled = (): boolean => process.env.ALLOW_SIGNUP !== '0'
+
+/** What the login page needs to decide whether to show the signup link. */
+export const signupConfig = guarded(async () => ({ enabled: signupEnabled() }))
+
+const signupSchema = z.object({
+  username: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, 'letters, digits, dot, dash and underscore only'),
+  password: z.string().min(8).max(256),
+})
+
+/**
+ * Create an account and sign it in.
+ *
+ * Usernames are stored lowercase, matching `verifyLogin`'s lookup; a taken name
+ * is a 409 rather than a silent login. Imported Miniflux users carry an empty
+ * password hash, so they cannot be logged into (or duplicated into) this way
+ * until `set-password` gives them one — the unique constraint still reserves
+ * the name.
+ */
+export const register = guarded(async (username: unknown, password: unknown) => {
+  if (!signupEnabled()) throw new HttpError(403, 'signups are closed')
+  const parsed = parse(signupSchema, { username, password })
+  const name = parsed.username.toLowerCase()
+  const handle = db()
+  if (handle.select({ id: users.id }).from(users).where(eq(users.username, name)).get()) {
+    throw new HttpError(409, 'username taken')
+  }
+  const id = newUserId(epochMs(Date.now()))
+  const passwordHash = await Bun.password.hash(parsed.password, { algorithm: 'argon2id' })
+  try {
+    handle.insert(users).values({ id, username: name, passwordHash, createdAt: epochMs(Date.now()) }).run()
+  } catch (error) {
+    // Two signups racing on one name: the unique index is the authority.
+    if (String(error).includes('UNIQUE')) throw new HttpError(409, 'username taken')
+    throw error
+  }
+  const user = { id, username: name }
+  const event = requestEvent()
+  cookieJar().set(SESSION_COOKIE, signSession(user), sessionCookieOptions())
+  event.locals.user = user
+  return { authenticated: true as const, username: name }
 })
 
 // ---- Reads ----
@@ -125,46 +176,6 @@ export const viewPanel = authed(async ({ user }, currentFeed: FeedId | null) => 
     userPrefs,
     feedPrefs: getAllFeedPrefs(handle, user.id),
   }
-})
-
-/**
- * Kick a refresh for the current view's feeds.
- *
- * The old app's Refresh asked Miniflux to poll those feeds and returned
- * immediately — Miniflux queued the work, so nothing was ever awaited. Ours
- * marks the feeds due now and lets the scheduler take them on its next tick
- * (≤60s). A freshly marked feed carries the earliest target, so a single-feed
- * refresh sits at the head of the fetch queue rather than behind the backlog.
- */
-export const refresh = authed(async ({ user }, filter: EntriesFilter) => {
-  const identity = parse(zodEntriesFilter, filter ?? {})
-  const handle = db()
-  const owned = handle
-    .select({ id: feeds.id, categoryId: feeds.categoryId })
-    .from(feeds)
-    .where(eq(feeds.userId, user.id))
-    .all()
-  const targets = owned.filter((feed) => {
-    if (identity.feedId) return feed.id === identity.feedId
-    if (identity.categoryId) return feed.categoryId === identity.categoryId
-    return true
-  })
-  if (targets.length === 0) return { queued: 0 }
-
-  handle
-    .update(feeds)
-    .set({ nextCheckAt: epochMs(Date.now()) })
-    .where(
-      and(
-        eq(feeds.userId, user.id),
-        inArray(
-          feeds.id,
-          targets.map((feed) => feed.id),
-        ),
-      ),
-    )
-    .run()
-  return { queued: targets.length }
 })
 
 // ---- Mutations ----

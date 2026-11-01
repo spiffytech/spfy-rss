@@ -27,7 +27,7 @@ const PANEL_ID = "feed-menu";
  */
 export const FeedMenu = () => {
   const r = useReader()
-  const { currentTitle, effectiveViewMode, isFavorite, markDisplayed, openEditFeed, refreshFeeds, setHideReadItems, setSort, setViewMode, toggleAutoRead, toggleFavorite, toggleHideEmptyFeeds, unreadCount, unsubscribe } = r
+  const { currentTitle, effectiveViewMode, isFavorite, markDisplayed, openEditFeed, setHideReadItems, setSort, setViewMode, toggleAutoRead, toggleFavorite, toggleHideEmptyFeeds, unreadCount, unsubscribe } = r
   // A setting in its affirmative state (enabled, hidden) carries the accent
   // fill. This follows the row's own value, not the underlying boolean: blue on
   // "Auto-read: disabling" would read as a contradiction.
@@ -142,7 +142,6 @@ export const FeedMenu = () => {
     closePanel();
   };
 
-  const onRefresh = () => runAndClose(() => refreshFeeds());
   const onViewMode = () =>
     runAndClose(() => setViewMode(effectiveViewMode() === "expanded" ? "list" : "expanded"));
   const onSort = () => runAndClose(() => setSort(r.sortOrder() === "newest" ? "oldest" : "newest"));
@@ -307,9 +306,6 @@ export const FeedMenu = () => {
               {/* Commands, in a two-up grid. Sign out spans the last row on its
                   own, so no cell is ever left half-empty. */}
               <div class="p-2 grid grid-cols-2 gap-1">
-                <button type="button" class="menu-row" onClick={onRefresh}>
-                  Refresh feeds
-                </button>
                 <Show when={isFeedView()}>
                   <button
                     type="button"

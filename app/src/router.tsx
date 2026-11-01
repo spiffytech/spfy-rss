@@ -1,6 +1,7 @@
 import { createRouter } from '@solidjs/router'
 import ReaderPage from './pages/Reader'
 import LoginPage from './pages/Login'
+import SignupPage from './pages/Signup'
 import NotFoundPage from './pages/NotFound'
 
 /**
@@ -17,6 +18,7 @@ export const Router = createRouter({
   routes: [
     { path: '/', component: ReaderPage },
     { path: '/login', component: LoginPage },
+    { path: '/signup', component: SignupPage },
     { path: '*404', component: NotFoundPage },
   ],
 })

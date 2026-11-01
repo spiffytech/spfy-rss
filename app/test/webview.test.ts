@@ -149,6 +149,82 @@ const until = (script: string, timeoutMs = 15_000): string => `
 `;
 
 /**
+ * A deliberately simple HTTP cache in front of the app.
+ *
+ * This is the stale-document failure made deterministic. A real browser may or
+ * may not reuse a document heuristically; a CDN configured with "cache
+ * everything" will, and so will some tab-restore paths. The proxy replays a
+ * document only when the response gave it permission to store it (no
+ * `no-cache`/`no-store`/`must-revalidate`/`max-age=0`), so the header contract
+ * is what the test exercises.
+ */
+const startCacheProxy = (upstream: string) => {
+  let staleHits = 0;
+  const store = new Map<string, { status: number; headers: Headers; body: ArrayBuffer }>();
+  const mayStore = (cacheControl: string | null): boolean => {
+    if (!cacheControl) return true;
+    const value = cacheControl.toLowerCase();
+    return (
+      !value.includes("no-store") &&
+      !value.includes("no-cache") &&
+      !value.includes("must-revalidate") &&
+      !/(^|,)\s*max-age=0\b/.test(value)
+    );
+  };
+
+  const proxy = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const url = new URL(req.url);
+      const key = url.pathname + url.search;
+      const isDocument =
+        req.method === "GET" &&
+        !url.pathname.startsWith("/_server") &&
+        !url.pathname.startsWith("/assets") &&
+        !url.pathname.startsWith("/api/");
+
+      if (isDocument) {
+        const hit = store.get(key);
+        if (hit) {
+          staleHits++;
+          return new Response(hit.body.slice(0), {
+            status: hit.status,
+            headers: new Headers(hit.headers),
+          });
+        }
+      }
+
+      const upstreamResponse = await fetch(`${upstream}${key}`, {
+        method: req.method,
+        headers: req.headers,
+        body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+        redirect: "manual",
+      });
+      const body = await upstreamResponse.arrayBuffer();
+      const headers = new Headers(upstreamResponse.headers);
+      if (
+        isDocument &&
+        upstreamResponse.status === 200 &&
+        (headers.get("content-type") ?? "").includes("text/html") &&
+        mayStore(headers.get("cache-control"))
+      ) {
+        store.set(key, { status: upstreamResponse.status, headers, body: body.slice(0) });
+      }
+      return new Response(body, { status: upstreamResponse.status, headers });
+    },
+  });
+
+  return {
+    base: `http://localhost:${proxy.port}`,
+    hits: () => staleHits,
+    reset: () => {
+      staleHits = 0;
+    },
+    stop: () => proxy.stop(true),
+  };
+};
+
+/**
  * Signs the fixture account in through the real login form.
  *
  * The suite used to call the SvelteKit `/api/login` endpoint directly. Those
@@ -176,15 +252,19 @@ const restoreUnread = (): void => {
 
 /** Open a feed's reading view. Replaces `navigate("/")`, which is now the home
  *  page (links, not entries). */
-const openFeedView = async (view: Bun.WebView, feedId = fixtureFeedId()): Promise<void> => {
-  await view.navigate(`${BASE}/?feed=${feedId}`);
+const openFeedView = async (
+  view: Bun.WebView,
+  feedId = fixtureFeedId(),
+  base = BASE,
+): Promise<void> => {
+  await view.navigate(`${base}/?feed=${feedId}`);
   await view.evaluate(
     until('const n = document.querySelectorAll("[data-entry-id]").length; return n > 0 ? n : 0'),
   );
 };
 
-const signIn = async (view: Bun.WebView): Promise<void> => {
-  await view.navigate(`${BASE}/login`);
+const signIn = async (view: Bun.WebView, base = BASE): Promise<void> => {
+  await view.navigate(`${base}/login`);
 
   // Chrome is spawned once per process and keeps its cookie store, so a later
   // test's fresh WebView may already be signed in — in which case /login
@@ -1241,6 +1321,200 @@ it("the reading pane keeps its position across a reload", async () => {
     expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(4);
   } finally {
     await view.close();
+  }
+}, 60_000);
+
+it("saves the scroll position without waiting for pagehide", async () => {
+  // Android can freeze or kill a tab without firing pagehide. A debounced save
+  // while scrolling, plus the Page Lifecycle freeze event, keeps a position
+  // available for the next document load.
+  restoreUnread();
+  const prefs = openDatabase(fixtureDbPath);
+  const feed = prefs.sqlite.query("SELECT id, user_id FROM feeds LIMIT 1").get() as {
+    id: string;
+    user_id: string;
+  };
+  prefs.sqlite.run(
+    "INSERT INTO user_prefs (user_id, scope, prefs) VALUES (?, ?, ?) ON CONFLICT (user_id, scope) DO UPDATE SET prefs = excluded.prefs",
+    [feed.user_id, `feed:${feed.id}`, JSON.stringify({ hideReadItems: false, sort: "oldest" })],
+  );
+  prefs.sqlite.close();
+
+  const view = new Bun.WebView({ width: 1100, height: 800 });
+  try {
+    await signIn(view);
+    const feedId = fixtureFeedId();
+    await openFeedView(view, feedId);
+    await view.evaluate(`
+      (() => {
+        const el = document.querySelector('[data-testid="entry-scroll"]')
+        const card = document.querySelectorAll('[data-entry-id]')[6]
+        el.scrollTop = el.scrollTop + (card.getBoundingClientRect().top - el.getBoundingClientRect().top)
+        return el.scrollTop
+      })()
+    `);
+
+    const raw = (await view.evaluate(
+      until("return sessionStorage.getItem('mf-scroll:2')", 3000),
+    )) as string | null;
+    expect(raw).not.toBeNull();
+    const saved = JSON.parse(raw!) as { view: string; anchor: string; offset: number };
+    expect(saved.view).toContain(feedId);
+    expect(saved.anchor).toMatch(/^[0-9a-f-]{36}$/);
+    expect(Number.isInteger(saved.offset)).toBe(true);
+
+    // The freeze event saves immediately; it does not wait for the debounce.
+    await view.evaluate(
+      "(() => { sessionStorage.removeItem('mf-scroll:2'); document.dispatchEvent(new Event('freeze')); return true })()",
+    );
+    const frozen = JSON.parse(
+      (await view.evaluate("sessionStorage.getItem('mf-scroll:2')")) as string,
+    ) as { anchor: string };
+    expect(frozen.anchor).toBe(saved.anchor);
+  } finally {
+    await view.close();
+  }
+}, 60_000);
+
+it("restores an anchor that sits beyond the first window", async () => {
+  // New entries arrive at the top while the tab is away, so the saved anchor
+  // can be past the first page. Restore must page until the id is present, not
+  // assume the old row count still reaches it.
+  restoreUnread();
+  const prefs = openDatabase(fixtureDbPath);
+  const feed = prefs.sqlite.query("SELECT id, user_id FROM feeds LIMIT 1").get() as {
+    id: string;
+    user_id: string;
+  };
+  prefs.sqlite.run(
+    "INSERT INTO user_prefs (user_id, scope, prefs) VALUES (?, ?, ?) ON CONFLICT (user_id, scope) DO UPDATE SET prefs = excluded.prefs",
+    [feed.user_id, `feed:${feed.id}`, JSON.stringify({ hideReadItems: false, sort: "oldest" })],
+  );
+  prefs.sqlite.close();
+
+  const view = new Bun.WebView({ width: 1100, height: 800 });
+  try {
+    await signIn(view);
+    await openFeedView(view);
+
+    // Pull the second page, then park the first card of that page at the top.
+    await view.evaluate(`
+      (() => {
+        const el = document.querySelector('[data-testid="entry-scroll"]')
+        el.scrollTop = el.scrollHeight
+        return el.scrollTop
+      })()
+    `);
+    await view.evaluate(until('return document.querySelectorAll("[data-entry-id]").length >= 110'));
+    const anchorId = (await view.evaluate(`
+      (() => {
+        const el = document.querySelector('[data-testid="entry-scroll"]')
+        const cards = document.querySelectorAll('[data-entry-id]')
+        const card = cards[cards.length - 1]
+        el.scrollTop = el.scrollTop + (card.getBoundingClientRect().top - el.getBoundingClientRect().top)
+        return card.dataset.entryId
+      })()
+    `)) as string;
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await view.reload();
+    const restored = (await view.evaluate(
+      until(`const el = document.querySelector('[data-testid="entry-scroll"]')
+        const anchor = document.getElementById('entry-${anchorId}')
+        if (!el || !anchor || el.scrollTop === 0) return 0
+        return Math.abs(anchor.getBoundingClientRect().top - el.getBoundingClientRect().top) < 8 ? 1 : 0`, 15_000),
+    )) as number;
+    expect(restored).toBe(1);
+    expect((await view.evaluate('document.querySelectorAll("[data-entry-id]").length')) as number).toBeGreaterThan(100);
+  } finally {
+    await view.close();
+  }
+}, 60_000);
+
+it("a reload from a stale cached document cannot resurrect read entries", async () => {
+  // The reported failure: after reading, a discarded tab reloads from a cache
+  // that was allowed to store the document. The SSR payload still says every
+  // entry is unread; the panel poll then updates the counter, so the list and
+  // the sidebar disagree. The cache proxy replays a document only when its
+  // headers permit storage; `private, no-cache` makes the reload revalidate.
+  restoreUnread();
+  const prefs = openDatabase(fixtureDbPath);
+  const feed = prefs.sqlite.query("SELECT id, user_id FROM feeds LIMIT 1").get() as {
+    id: string;
+    user_id: string;
+  };
+  prefs.sqlite.run(
+    "INSERT INTO user_prefs (user_id, scope, prefs) VALUES (?, ?, ?) ON CONFLICT (user_id, scope) DO UPDATE SET prefs = excluded.prefs",
+    [feed.user_id, `feed:${feed.id}`, JSON.stringify({ hideReadItems: false })],
+  );
+  prefs.sqlite.close();
+
+  const proxy = startCacheProxy(BASE);
+  const view = new Bun.WebView({ width: 1100, height: 800 });
+  try {
+    await signIn(view, proxy.base);
+    const feedId = fixtureFeedId();
+    await openFeedView(view, feedId, proxy.base);
+    await view.evaluate(until('return document.querySelectorAll("[data-entry-id]").length >= 10'));
+
+    // Read a batch the way a scroll does, leaving the cached document stale.
+    await view.evaluate(`
+      (() => {
+        const el = document.querySelector('[data-testid="entry-scroll"]')
+        el.scrollTop = 2400
+        return el.scrollTop
+      })()
+    `);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const db = openDatabase(fixtureDbPath);
+    const read = db.sqlite
+      .query("SELECT id FROM entries WHERE feed_id = ? AND status = 'read' ORDER BY published_at LIMIT 1")
+      .get(feedId) as { id: string } | null;
+    const unread = (
+      db.sqlite.query("SELECT count(*) AS n FROM entries WHERE feed_id = ? AND status = 'unread'").get(feedId) as {
+        n: number;
+      }
+    ).n;
+    db.sqlite.close();
+    expect(read).not.toBeNull();
+
+    proxy.reset();
+    // A discarded tab may never fire pagehide. Model that worst case: no saved
+    // scroll position, so no scroll-driven auto-read paints over the stale rows.
+    await view.evaluate(
+      '(() => { sessionStorage.clear(); Storage.prototype.setItem = function(){}; return true })()',
+    );
+    await view.reload();
+    await view.evaluate(until('return document.querySelectorAll("[data-entry-id]").length >= 10'));
+
+    const restoredClass = (await view.evaluate(`
+      (() => {
+        const el = document.getElementById('entry-${read!.id}')
+        return el ? el.className : null
+      })()
+    `)) as string | null;
+    // The row the server knows is read must render read on the reloaded
+    // document, not wait for an idle refresh or a scroll to correct it.
+    expect(restoredClass).toContain("bg-gray-100");
+
+    // Force the panel read the way the idle poll does. The list must already
+    // agree with it; this is where the counter used to show the true number
+    // while the list kept saying "unread".
+    await view.click(`[data-testid="feed-panel"] a[href="/?feed=${feedId}"]`);
+    const count = (await view.evaluate(
+      until(`const a = document.querySelector('[data-testid="feed-panel"] a[href="/?feed=${feedId}"]')
+        const row = a && a.closest('li')
+        const c = row && row.querySelector('[data-testid="feed-count"]')
+        return c && c.textContent === '${unread}' ? c.textContent : 0`),
+    )) as string | number;
+    expect(String(count)).toBe(String(unread));
+
+    // The proxy must not have replayed the stale document at all.
+    expect(proxy.hits()).toBe(0);
+  } finally {
+    await view.close();
+    proxy.stop();
   }
 }, 60_000);
 

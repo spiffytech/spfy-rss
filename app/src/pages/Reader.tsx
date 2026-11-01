@@ -67,8 +67,7 @@ export const ReaderPage = () => {
     const stopScroll = watchScroll(r);
     const stopMemory = installScrollMemory({
       viewKey: r.viewKey,
-      wanted: () => r.session.wanted,
-      ensureWindow: r.ensureWindow,
+      ensureEntry: r.ensureEntry,
     });
 
     return () => {

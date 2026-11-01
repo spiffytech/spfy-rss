@@ -5,6 +5,7 @@ import type { FeedId } from "../shared/ids";
 import { computePopoverPlacement } from "../shared/popover";
 import { DEFAULT_HIDE_EMPTY_FEEDS } from "../shared/prefs";
 import { createSearch } from "../lib/search";
+import { clearScrollMemory } from "../lib/scroll-memory";
 import * as api from "../server/actions";
 import { useReader } from '../lib/reader-context'
 
@@ -171,6 +172,7 @@ export const FeedMenu = () => {
 
   const onLogout = async (): Promise<void> => {
     await api.logout();
+    clearScrollMemory();
     closePanel();
     await navigate("/login");
   };

@@ -24,6 +24,7 @@ import {
   createStore,
   refresh,
   snapshot,
+  untrack,
 } from 'solid-js'
 
 import * as api from '../server/actions'
@@ -573,18 +574,22 @@ export const createReader = (filter: () => EntriesFilter) => {
   }
 
   /**
-   * Grow the window to at least `count` rows.
+   * Is this entry in the window? If not, ask for the next page.
    *
-   * Used by scroll restoration: a saved position can sit past the first page,
-   * which is all a fresh load (or a restored tab) has in hand.
+   * Used by scroll restoration: the saved anchor can sit past the first page,
+   * or new entries can arrive above it while the tab is away. A row count is
+   * not enough — the anchor is the target, so keep paging until it appears or
+   * `nextCursor` runs out. `loadMore` is idempotent while a fetch is in flight,
+   * so the restore loop can call this on every frame.
    */
-  const ensureWindow = (count: number): void => {
-    if (count <= session.wanted) return
-    setSession((draft) => {
-      draft.wanted = count
+  const ensureEntry = (entryId: EntryId): boolean =>
+    // A one-shot query from the scroll-restore loop, not a dependency of the
+    // page derive. It can run while that derive is mid-await on the first page.
+    untrack(() => {
+      if (entries().some((entry) => entry.id === entryId)) return true
+      if (page.nextCursor) loadMore()
+      return false
     })
-    refresh(page)
-  }
 
   // A new view means a new list. Keyed on the URL filter (a string), not on the
   // projection's value: that would re-fire on every read and loop, because the
@@ -844,7 +849,7 @@ export const createReader = (filter: () => EntriesFilter) => {
     toggleStar,
     loadMore,
     checkTail,
-    ensureWindow,
+    ensureEntry,
     refreshPanel,
     reloadList,
     setViewMode,

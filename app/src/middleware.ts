@@ -20,6 +20,20 @@ const PUBLIC_PATHS = new Set([LOGIN_PATH, SIGNUP_PATH])
 const isServerFunction = (path: string) => path === '/_server' || path.startsWith('/_server/')
 
 /**
+ * Auth'd HTML: private to this browser, and never reused without asking the
+ * server. `no-cache` (not `no-store`) keeps the document bfcache-eligible, so a
+ * back/forward restore keeps the live read state and scroll position. The stale
+ * bug this guards against is HTTP reuse, which `no-cache` forbids.
+ */
+const DOCUMENT_CACHE = 'private, no-cache'
+
+/**
+ * Server functions: per-user reads and mutations, some of them GET. A cache
+ * must not store or replay them, and there is no navigation/bfcache reason to.
+ */
+const RPC_CACHE = 'private, no-store'
+
+/**
  * Old URL shapes, kept because they are in the wild: a bookmarked feed URL, a
  * search box that submits GET, and anything else — the old app bounced unknown
  * paths to the reader root. Only document navigations are redirected, so an
@@ -69,12 +83,19 @@ export default (async (event, next) => {
     (event.locals.user && PUBLIC_PATHS.has(url.pathname) ? '/' : null)
 
   if (redirect) {
-    const response = new Response(null, { status: 302, headers: { location: redirect } })
+    const response = new Response(null, {
+      status: 302,
+      headers: { location: redirect, 'cache-control': 'no-store' },
+    })
     for (const cookie of setCookies) response.headers.append('set-cookie', cookie)
     return response
   }
 
   const response = await next()
+  // The handler owns the body but not the cache policy. Documents embed this
+  // user's rows and read state; server functions answer per-user reads and
+  // writes. Neither may be replayed from a shared or unvalidated cache.
+  response.headers.set('cache-control', isServerFunction(url.pathname) ? RPC_CACHE : DOCUMENT_CACHE)
   for (const cookie of setCookies) response.headers.append('set-cookie', cookie)
   return response
 }) satisfies StartMiddleware

@@ -15,10 +15,13 @@ export interface ApiContext {
   user: SessionUser | null
 }
 
+/** Operational and handshake responses: never worth replaying. */
+const NO_STORE = { 'cache-control': 'no-store' } as const
+
 const json = (data: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(data), {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { 'content-type': 'application/json', ...NO_STORE, ...(init?.headers ?? {}) },
   })
 
 /**
@@ -92,11 +95,13 @@ const schedulerHealthResponse = (): Response =>
  * is not emitted — this is plain OPML 2.0.
  */
 const opmlResponse = (user: SessionUser | null): Response => {
-  if (!user) return new Response('not authenticated', { status: 401 })
+  if (!user) return new Response('not authenticated', { status: 401, headers: NO_STORE })
   return new Response(exportOpml(appDb(), user.id), {
     headers: {
       'content-type': 'text/x-opml; charset=utf-8',
       'content-disposition': 'attachment; filename="subscriptions.opml"',
+      // A complete subscription map, generated per request. Never store it.
+      'cache-control': 'private, no-store',
     },
   })
 }
@@ -117,12 +122,15 @@ const feedIcon = (feedId: string) =>
     .get()
 
 const iconResponse = (feedId: string, user: SessionUser | null): Response => {
-  if (!user) return new Response('not authenticated', { status: 401 })
+  if (!user) return new Response('not authenticated', { status: 401, headers: NO_STORE })
   const row = feedIcon(feedId)
-  if (!row) return new Response('no icon', { status: 404 })
+  if (!row) return new Response('no icon', { status: 404, headers: NO_STORE })
   return new Response(new Uint8Array(row.data), {
     headers: {
       'content-type': row.mimeType,
+      // Deliberately cacheable: a favicon is a stable public asset, and the feed
+      // id is unguessable. The URL does not change when the bytes do, so no
+      // `immutable` — the day is the freshness bound, not a promise forever.
       'cache-control': 'private, max-age=86400',
     },
   })
@@ -147,15 +155,15 @@ const webSubResponse = async (request: Request, url: URL): Promise<Response> => 
     const challenge = url.searchParams.get('hub.challenge')
     const topic = url.searchParams.get('hub.topic')
     if (mode !== 'subscribe' && mode !== 'unsubscribe')
-      return new Response('bad mode', { status: 400 })
-    if (!challenge) return new Response('no challenge', { status: 400 })
+      return new Response('bad mode', { status: 400, headers: NO_STORE })
+    if (!challenge) return new Response('no challenge', { status: 400, headers: NO_STORE })
     const feed = db.db.select().from(feeds).where(eq(feeds.websubToken, token)).get()
-    if (!feed) return new Response('unknown subscription', { status: 404 })
+    if (!feed) return new Response('unknown subscription', { status: 404, headers: NO_STORE })
     // The hub tells us which topic it thinks it is verifying. Refuse a mismatch
     // so one feed's token can never be used to verify another's.
     if (topic && topic !== feed.feedUrl) {
       console.warn('websub: verification refused, topic mismatch', feed.feedUrl, 'vs', topic)
-      return new Response('topic mismatch', { status: 404 })
+      return new Response('topic mismatch', { status: 404, headers: NO_STORE })
     }
 
     // On unsubscribe the hub is confirming a teardown: drop the lease so the
@@ -167,16 +175,19 @@ const webSubResponse = async (request: Request, url: URL): Promise<Response> => 
     // The only place a hub's verification becomes observable: a granted lease
     // (websub_lease_until in the future) is proof this GET answered.
     console.log('websub: verified', mode, JSON.stringify(feed.title), feed.feedUrl)
-    return new Response(challenge, { status: 200, headers: { 'content-type': 'text/plain' } })
+    return new Response(challenge, {
+      status: 200,
+      headers: { 'content-type': 'text/plain', ...NO_STORE },
+    })
   }
 
   if (request.method === 'POST') {
     const raw = await request.text()
     const feed = db.db.select().from(feeds).where(eq(feeds.websubToken, token)).get()
-    if (!feed) return new Response('unknown subscription', { status: 404 })
+    if (!feed) return new Response('unknown subscription', { status: 404, headers: NO_STORE })
     if (!verifySignature(feed.websubToken ?? '', raw, request.headers.get('x-hub-signature'))) {
       console.warn('websub: notification rejected, bad signature', JSON.stringify(feed.title))
-      return new Response('bad signature', { status: 403 })
+      return new Response('bad signature', { status: 403, headers: NO_STORE })
     }
     // The payload is ignored on purpose: hubs differ (full document vs bare
     // ping) and the feed is the source of truth anyway. One fetch makes them
@@ -188,11 +199,11 @@ const webSubResponse = async (request: Request, url: URL): Promise<Response> => 
       // alive and the poller catches whatever we missed — but say so, or a hub
       // delivering into a broken ingest looks exactly like a hub not delivering.
       console.error('websub: notification fetch failed', JSON.stringify(feed.title), error)
-      return new Response(null, { status: 200 })
+      return new Response(null, { status: 200, headers: NO_STORE })
     }
     console.log('websub: notification', JSON.stringify(feed.title), `${raw.length}B`)
-    return new Response(null, { status: 200 })
+    return new Response(null, { status: 200, headers: NO_STORE })
   }
 
-  return new Response('method not allowed', { status: 405 })
+  return new Response('method not allowed', { status: 405, headers: NO_STORE })
 }

@@ -49,6 +49,20 @@ describe('schema + migrations', () => {
     }
   })
 
+  test('dead fields are gone and fetch errors have a place to live', () => {
+    const { sqlite } = openDatabase(':memory:')
+    const cols = (table: string) =>
+      sqlite
+        .query<{ name: string }, SQLQueryBindings[]>(`PRAGMA table_info(${table})`)
+        .all()
+        .map((r) => r.name)
+    expect(cols('users')).not.toContain('is_admin')
+    expect(cols('feeds')).not.toContain('disabled')
+    expect(cols('feeds')).toEqual(expect.arrayContaining(['last_error', 'last_error_at']))
+    expect(cols('entries')).not.toContain('comments_url')
+    expect(cols('entries')).not.toContain('language')
+  })
+
   test('times round-trip as plain epoch-ms numbers, tags as string[]', () => {
     const { db, userId, feedId } = seed()
     db.insert(entries).values(entryValues(feedId, userId)).run()

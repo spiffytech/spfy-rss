@@ -93,7 +93,7 @@ export function loadFromDump(opts: {
       }
       const id = newUserId(epochMs(row.created_at ?? now))
       db.insert(users)
-        .values({ id, username, passwordHash: '', isAdmin: row.is_admin === true, createdAt: epochMs(row.created_at ?? now) })
+        .values({ id, username, passwordHash: '', createdAt: epochMs(row.created_at ?? now) })
         .run()
       userMap.set(row.id, id)
       report.users++
@@ -146,7 +146,6 @@ export function loadFromDump(opts: {
           lastModifiedHeader: row.last_modified_header ?? null,
           checkedAt: row.checked_at == null ? null : epochMs(row.checked_at),
           parsingErrorCount: row.parsing_error_count ?? 0,
-          disabled: row.disabled === true,
           createdAt: epochMs(row.created_at ?? row.checked_at ?? now),
         })
         .run()
@@ -172,7 +171,6 @@ export function loadFromDump(opts: {
           hash: row.hash,
           title: row.title ?? '',
           url: row.url ?? null,
-          commentsUrl: row.comments_url ?? null,
           author: row.author ?? null,
           content: row.content ?? '',
           publishedAt: epochMs(row.published_at),
@@ -182,7 +180,6 @@ export function loadFromDump(opts: {
           starred: row.starred === true,
           readingTime: row.reading_time ?? 0,
           tags: row.tags ?? [],
-          language: row.language ?? null,
         })
         .onConflictDoNothing()
         .run()
@@ -206,7 +203,6 @@ export function loadFromDump(opts: {
           hash: row.hash,
           title: '',
           url: null,
-          commentsUrl: null,
           author: null,
           content: '',
           publishedAt: deletedAt,
@@ -216,7 +212,6 @@ export function loadFromDump(opts: {
           starred: false,
           readingTime: 0,
           tags: [],
-          language: null,
         })
         .onConflictDoNothing()
         .run()

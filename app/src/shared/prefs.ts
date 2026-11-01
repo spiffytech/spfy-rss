@@ -31,8 +31,8 @@ export const DEFAULT_VIEW_MODE = 'expanded' as const
 export const DEFAULT_SORT = 'oldest' as const
 export const DEFAULT_HIDE_READ_ITEMS = true
 
-/** Reading time is surfaced only at or above this many minutes. */
-export const READING_TIME_DISPLAY_MIN = 2
+/** Reading time is surfaced only above this many minutes (strictly greater). */
+export const READING_TIME_DISPLAY_MIN = 5
 
 /**
  * Fold a feed's saved view prefs into a filter, falling back to the hardcoded

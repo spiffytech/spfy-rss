@@ -4,7 +4,7 @@ import { useNavigate } from '@solidjs/router'
 import type { FeedInfo } from '../shared/types'
 import { DEFAULT_HIDE_EMPTY_FEEDS } from '../shared/prefs'
 import { hasView } from '../shared/filter'
-import { compareTitlesCI } from '../shared/util'
+import { compareTitlesCI, timeAgo } from '../shared/util'
 import { autofocus } from '../lib/observers'
 import { useReader } from '../lib/reader-context'
 import { FeedIcon } from './FeedIcon'
@@ -62,6 +62,22 @@ export const FeedPanel = () => {
   }
 
   const isActiveFeed = (feedId: string) => r.filter().feedId === feedId
+
+  /**
+   * The fetch warning's tooltip: how many failures in the streak, when the feed
+   * was last tried, and the message the failure carried. Only what the server
+   * stored — the streak resets (and the message clears) on the next good fetch.
+   */
+  const fetchWarning = (feed: FeedInfo): string | null => {
+    if (feed.parsingErrorCount === 0) return null
+    const parts = [
+      `${feed.parsingErrorCount} fetch ${feed.parsingErrorCount === 1 ? 'error' : 'errors'}`,
+    ]
+    if (feed.lastErrorAt !== null) parts.push(`last tried ${timeAgo(feed.lastErrorAt)}`)
+    if (feed.lastError) parts.push(feed.lastError)
+    return parts.join(' · ')
+  }
+
   const isRenamingCategory = (categoryId: string) =>
     r.session.renameId === categoryId && r.session.renameKind === 'category'
   const hideEmptyFeeds = () => r.panel.userPrefs.hideEmptyFeeds ?? DEFAULT_HIDE_EMPTY_FEEDS
@@ -141,7 +157,15 @@ export const FeedPanel = () => {
           count (which the pencil replaces on hover). */}
       <span class="relative flex items-baseline gap-x-1 shrink-0">
         <Show when={props.feed.parsingErrorCount > 0}>
-          <span title="Fetch errors">⚠️</span>
+          <span
+            data-testid="feed-error"
+            role="img"
+            tabindex="0"
+            aria-label={fetchWarning(props.feed) ?? 'Fetch errors'}
+            title={fetchWarning(props.feed) ?? 'Fetch errors'}
+          >
+            ⚠️
+          </span>
         </Show>
         <Show when={r.isFavorite(props.feed.id)}>
           <span

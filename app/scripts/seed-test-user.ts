@@ -67,7 +67,7 @@ if (db.select().from(users).where(eq(users.username, 'test')).get()) {
 
 const tx = handle.sqlite.transaction(() => {
   const testId = newUserId(now)
-  db.insert(users).values({ id: testId, username: 'test', passwordHash: '', isAdmin: false, createdAt: now }).run()
+  db.insert(users).values({ id: testId, username: 'test', passwordHash: '', createdAt: now }).run()
 
   // one category per source category title (typically "All")
   const catByTitle = new Map<string, ReturnType<typeof newCategoryId>>()
@@ -100,7 +100,6 @@ const tx = handle.sqlite.transaction(() => {
         lastModifiedHeader: null,
         checkedAt: null,
         parsingErrorCount: 0,
-        disabled: false,
         createdAt: now,
       })
       .run()
@@ -121,7 +120,6 @@ const tx = handle.sqlite.transaction(() => {
           hash: entry.hash,
           title: entry.title,
           url: entry.url,
-          commentsUrl: entry.commentsUrl,
           author: entry.author,
           content: entry.content,
           publishedAt: entry.publishedAt,
@@ -131,7 +129,6 @@ const tx = handle.sqlite.transaction(() => {
           starred: false,
           readingTime: entry.readingTime,
           tags: entry.tags,
-          language: entry.language,
         })
         .onConflictDoNothing()
         .run()

@@ -16,7 +16,6 @@ export const mfUser = z
   .object({
     id: z.number(),
     username: z.string(),
-    is_admin: z.boolean().nullable().optional(),
     created_at: ts,
   })
   .passthrough()
@@ -42,7 +41,6 @@ export const mfFeed = z
     last_modified_header: z.string().nullable().optional(),
     checked_at: ts,
     parsing_error_count: int,
-    disabled: z.boolean().nullable().optional(),
     created_at: ts,
   })
   .passthrough()
@@ -55,7 +53,6 @@ export const mfEntry = z
     hash: z.string(),
     title: z.string().nullable().optional(),
     url: z.string().nullable().optional(),
-    comments_url: z.string().nullable().optional(),
     author: z.string().nullable().optional(),
     content: z.string().nullable().optional(),
     published_at: z.number(),
@@ -65,7 +62,6 @@ export const mfEntry = z
     starred: z.boolean().nullable().optional(),
     reading_time: int,
     tags: z.array(z.string()).nullable().optional(),
-    language: z.string().nullable().optional(),
   })
   .passthrough()
 

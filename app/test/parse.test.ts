@@ -168,10 +168,9 @@ describe('parse: author and Dublin Core fields', () => {
     expect(feed.items[0]!.author).toBe('Editor')
   })
 
-  test('RSS: dc:date, dc:language and dc:title are read', () => {
+  test('RSS: dc:date and dc:title are read', () => {
     const one = item('<dc:date>2025-01-02T03:04:05Z</dc:date><dc:language>en</dc:language><dc:title>Dublin</dc:title>')
     expect(one.publishedAt).toBe(epochMs(Date.parse('2025-01-02T03:04:05Z')))
-    expect(one.language).toBe('en')
     expect(one.title).toBe('Dublin')
   })
 

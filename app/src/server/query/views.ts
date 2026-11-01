@@ -35,6 +35,7 @@ const entryColumns = {
   status: entries.status,
   starred: entries.starred,
   content: sql<string>`COALESCE(${entries.content}, '')`,
+  readingTime: entries.readingTime,
   feedBaseUrl: sql<string | null>`COALESCE(${feeds.siteUrl}, ${feeds.feedUrl})` as SQL<string | null>,
 } as const
 
@@ -142,9 +143,6 @@ export function entriesByIds(
   return db
     .select({
       ...entryColumns,
-      starred: entries.starred,
-      readingTime: entries.readingTime,
-      tags: entries.tags,
     })
     .from(entries)
     .innerJoin(feeds, eq(entries.feedId, feeds.id))
@@ -170,8 +168,10 @@ export function panel(
       title: feeds.title,
       siteUrl: feeds.siteUrl,
       feedUrl: feeds.feedUrl,
-      disabled: feeds.disabled,
+      checkedAt: feeds.checkedAt,
       parsingErrorCount: feeds.parsingErrorCount,
+      lastError: feeds.lastError,
+      lastErrorAt: feeds.lastErrorAt,
       iconId: feedIcons.iconId,
     })
     .from(feeds)
@@ -205,8 +205,10 @@ export function panel(
     title: f.title,
     siteUrl: f.siteUrl,
     feedUrl: f.feedUrl,
-    disabled: f.disabled,
+    checkedAt: f.checkedAt,
     parsingErrorCount: f.parsingErrorCount,
+    lastError: f.lastError,
+    lastErrorAt: f.lastErrorAt,
     hasIcon: f.iconId !== null,
   })
 

@@ -18,12 +18,10 @@ export type ParsedItem = {
   hash: string
   title: string
   url: string | null
-  commentsUrl: string | null
   author: string | null
   content: string
   publishedAt: EpochMs
   tags: string[]
-  language: string | null
 }
 
 export type ParsedFeed = {
@@ -132,7 +130,6 @@ function parseRss(parsed: unknown, feedUrl: string, now: number, jitter: () => n
   const feed = rec(parsed)
   const siteUrl = resolveUrl(feedUrl, str(feed.link)) || null
   const feedTitle = str(feed.title)
-  const feedLanguage = str(feed.language)
 
   const rawItems = arr(feed.items)
   const identities: RssItemIdentity[] = []
@@ -197,7 +194,6 @@ function parseRss(parsed: unknown, feedUrl: string, now: number, jitter: () => n
       hash: hashes[i]!,
       title: m.title,
       url: m.url === '' ? null : m.url,
-      commentsUrl: comments !== '' && /^https?:\/\//i.test(comments) ? comments : null,
       // MF's findEntryAuthor chain, then its findFeedAuthor fallback.
       author:
         [
@@ -214,7 +210,6 @@ function parseRss(parsed: unknown, feedUrl: string, now: number, jitter: () => n
       content,
       publishedAt: clampStoryDate(dateOf(m.item.pubDate ?? (first(m.dc.dates) || undefined)), now, jitter),
       tags: arr(m.item.categories).map((c) => (typeof c === 'string' ? c : str(rec(c).name))).filter((t) => t !== ''),
-      language: [first(m.dc.languages), feedLanguage].find((v) => v !== '') || null,
     }
   })
 
@@ -242,7 +237,6 @@ function resolveIcon(feed: Rec, siteUrl: string | null, feedUrl: string): string
 function parseAtom(parsed: unknown, feedUrl: string, now: number, jitter: () => number): ParsedFeed {
   const feed = rec(parsed)
   const siteUrl = firstAlternateLink(feed.links) || str(feed.link) || ''
-  const feedLanguage = str(feed.language)
 
   const items: ParsedItem[] = arr(feed.entries ?? feed.items).map((raw) => {
     const entry = rec(raw)
@@ -262,12 +256,10 @@ function parseAtom(parsed: unknown, feedUrl: string, now: number, jitter: () => 
       // does the same for CDATA titles (atom10Text.title).
       title: htmlUnescape(textOf(entry.title)),
       url: url === '' ? null : url,
-      commentsUrl: null,
       author,
       content,
       publishedAt: clampStoryDate(dateOf(entry.published ?? entry.updated), now, jitter),
       tags: arr(entry.categories).map((c) => (typeof c === 'string' ? c : str(rec(c).name))).filter((t) => t !== ''),
-      language: feedLanguage || null,
     }
   })
 
@@ -290,7 +282,6 @@ function parseRdf(parsed: unknown, feedUrl: string, now: number, jitter: () => n
       hash: rdfEntryHash({ link: str(item.link), title, description }),
       title: title === '' ? link : title,
       url: link === '' ? null : link,
-      commentsUrl: null,
       // MF's RDF chain: item dc:creator → channel dc:creator.
       author: [first(dc.creators), first(rec(feed.dc).creators)].find((v) => v !== '') ?? null,
       content: chooseContent({
@@ -301,7 +292,6 @@ function parseRdf(parsed: unknown, feedUrl: string, now: number, jitter: () => n
       }),
       publishedAt: clampStoryDate(dateOf(first(dc.dates) || undefined), now, jitter),
       tags: [],
-      language: first(dc.languages) || null,
     }
   })
 
@@ -331,7 +321,6 @@ function parseJson(parsed: unknown, feedUrl: string, now: number, jitter: () => 
       }),
       title: str(item.title),
       url: url === '' ? null : url,
-      commentsUrl: null,
       author: arr(item.authors).map((a) => str(rec(a).name)).find((v) => v !== '') ?? null,
       content: chooseContent({
         contentItems: [
@@ -342,7 +331,6 @@ function parseJson(parsed: unknown, feedUrl: string, now: number, jitter: () => 
       }),
       publishedAt: clampStoryDate(dateOf(item.date_published ?? item.date_modified), now, jitter),
       tags: arr(item.tags).map(str).filter((t) => t !== ''),
-      language: str(item.language) || null,
     }
   })
 

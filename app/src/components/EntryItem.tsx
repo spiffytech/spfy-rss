@@ -1,6 +1,7 @@
 import { Show, createEffect, createSignal, untrack } from 'solid-js'
 
 import type { EntrySummary } from '../shared/types'
+import { READING_TIME_DISPLAY_MIN } from '../shared/prefs'
 import { timeAgo } from '../shared/util'
 import { trackEntry } from '../lib/observers'
 import { sinkEntryContent, transformEntryContent } from '../lib/display/render'
@@ -208,6 +209,10 @@ export const EntryItem = (props: { entry: EntrySummary }) => {
           <Show when={props.entry.author && props.entry.author !== props.entry.feedTitle}>
             {' · '}
             {props.entry.author}
+          </Show>
+          <Show when={props.entry.readingTime > READING_TIME_DISPLAY_MIN}>
+            {' · '}
+            {props.entry.readingTime} min read
           </Show>
         </div>
 

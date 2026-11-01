@@ -36,6 +36,13 @@
       "when": 1793323500806,
       "tag": "0004_flippant_thunderbolt_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793498417161,
+      "tag": "0005_strip_dead_fields",
+      "breakpoints": true
     }
   ]
 }

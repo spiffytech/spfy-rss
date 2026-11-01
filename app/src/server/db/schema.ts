@@ -29,7 +29,6 @@ export const users = sqliteTable('users', {
   id: text('id').$type<UserId>().primaryKey(),
   username: text('username').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
-  isAdmin: integer('is_admin', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').$type<EpochMs>().notNull(),
 })
 
@@ -62,8 +61,8 @@ export const feeds = sqliteTable(
     title: text('title').notNull(),
     feedUrl: text('feed_url').notNull(),
     siteUrl: text('site_url'),
-    // Fetch continuity for the future scheduler: conditional-GET headers,
-    // last check time, and the error count Miniflux kept per feed.
+    // Fetch continuity: conditional-GET headers, last check time, and the
+    // error streak Miniflux kept per feed.
     etagHeader: text('etag_header'),
     lastModifiedHeader: text('last_modified_header'),
     checkedAt: integer('checked_at').$type<EpochMs>(),
@@ -79,7 +78,10 @@ export const feeds = sqliteTable(
     /** Unguessable per-feed token: /api/websub/<token> is the public callback.
      *  Also the HMAC secret the hub signs notifications with. */
     websubToken: text('websub_token'),
-    disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
+    /** The last fetch/parse failure, cleared by the next successful ingest.
+     *  Shown (with its timestamp and the error streak) on the feed's warning. */
+    lastError: text('last_error'),
+    lastErrorAt: integer('last_error_at').$type<EpochMs>(),
     createdAt: integer('created_at').$type<EpochMs>().notNull(),
   },
   (t) => [uniqueIndex('feeds_user_url_uq').on(t.userId, t.feedUrl), index('feeds_user_idx').on(t.userId)],
@@ -102,7 +104,6 @@ export const entries = sqliteTable(
     hash: text('hash').notNull(),
     title: text('title').notNull(),
     url: text('url'),
-    commentsUrl: text('comments_url'),
     author: text('author'),
     // Raw feed HTML, unmodified. ALL transforms happen at display time.
     content: text('content').notNull(),
@@ -111,10 +112,9 @@ export const entries = sqliteTable(
     changedAt: integer('changed_at').$type<EpochMs>().notNull(),
     status: text('status').$type<EntryStatus>().notNull().default('unread'),
     starred: integer('starred', { mode: 'boolean' }).notNull().default(false),
-    // MF-computed minutes; surfaced only when >= READING_TIME_DISPLAY_MIN.
+    // MF-computed minutes; surfaced only when above the display threshold.
     readingTime: integer('reading_time').$type<number>().notNull().default(0),
     tags: text('tags', { mode: 'json' }).$type<string[]>().notNull().default([]),
-    language: text('language'),
   },
   (t) => [
     uniqueIndex('entries_feed_hash_uq').on(t.feedId, t.hash),

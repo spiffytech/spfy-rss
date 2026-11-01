@@ -23,6 +23,8 @@ export type EntrySummary = {
    * The display pipeline still runs client-side (untrusted feed HTML).
    */
   content: string
+  /** Estimated minutes; render only above the display threshold. */
+  readingTime: number
   /** Feed base URL for resolving relative links inside the body. */
   feedBaseUrl: string | null
 }
@@ -39,8 +41,12 @@ export type FeedInfo = {
   title: string
   siteUrl: string | null
   feedUrl: string
-  disabled: boolean
+  /** Last attempt, successful or not; null if never fetched. */
+  checkedAt: EpochMs | null
   parsingErrorCount: number
+  /** Latest failure message and when it happened; both null after a good fetch. */
+  lastError: string | null
+  lastErrorAt: EpochMs | null
   /** Whether an icon exists. The URL is `/api/icons/<id>` — the client builds it. */
   hasIcon: boolean
 }

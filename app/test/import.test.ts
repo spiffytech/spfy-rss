@@ -22,8 +22,8 @@ function writeDump(dir: string, tables: Record<string, unknown[]>): void {
 function fixtureDump(): Record<string, unknown[]> {
   return {
     users: [
-      { id: 1, username: 'spiffy', is_admin: true, created_at: 1000 },
-      { id: 2, username: 'test', is_admin: false, created_at: 1001 },
+      { id: 1, username: 'spiffy', created_at: 1000 },
+      { id: 2, username: 'test', created_at: 1001 },
     ],
     categories: [{ id: 10, user_id: 1, title: 'Tech', created_at: 2000 }],
     feeds: [
@@ -38,7 +38,6 @@ function fixtureDump(): Record<string, unknown[]> {
         last_modified_header: 'Thu, 01 Jan 2026 00:00:00 GMT',
         checked_at: 5000,
         parsing_error_count: 2,
-        disabled: false,
         created_at: 3000,
       },
     ],
@@ -50,7 +49,6 @@ function fixtureDump(): Record<string, unknown[]> {
         hash: 'h1',
         title: 'One',
         url: 'https://a.example/1',
-        comments_url: 'https://a.example/1#comments',
         author: 'au',
         content: '<p>one</p>',
         published_at: 4000,
@@ -60,7 +58,6 @@ function fixtureDump(): Record<string, unknown[]> {
         starred: true,
         reading_time: 3,
         tags: ['x'],
-        language: 'en',
       },
       {
         id: 1001,
@@ -76,7 +73,6 @@ function fixtureDump(): Record<string, unknown[]> {
         starred: false,
         reading_time: 0,
         tags: [],
-        language: null,
       },
       // orphan: feed 999 has no feeds row (MF keeps these; import skips them)
       { id: 1002, user_id: 1, feed_id: 999, hash: 'h-orphan', title: 'Orphan', content: 'x', published_at: 4200, status: 'unread' },

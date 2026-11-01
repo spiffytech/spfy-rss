@@ -41,11 +41,9 @@ function differs(existing: typeof entries.$inferSelect, item: ParsedItem): boole
   return (
     existing.title !== item.title ||
     existing.url !== item.url ||
-    existing.commentsUrl !== item.commentsUrl ||
     existing.author !== item.author ||
     existing.content !== item.content ||
-    JSON.stringify(existing.tags) !== JSON.stringify(item.tags) ||
-    existing.language !== item.language
+    JSON.stringify(existing.tags) !== JSON.stringify(item.tags)
   )
 }
 
@@ -66,20 +64,28 @@ export function ingestFeedOutcome(opts: {
   const feed = db.select().from(feeds).where(eq(feeds.id, opts.feedId)).get()
   if (!feed) return { kind: 'error', message: `unknown feed ${opts.feedId}` }
 
-  const bumpErrors = (checkedAt: number) => {
+  const bumpErrors = (checkedAt: number, message: string) => {
     db.update(feeds)
-      .set({ checkedAt: epochMs(checkedAt), parsingErrorCount: feed.parsingErrorCount + 1 })
+      .set({
+        checkedAt: epochMs(checkedAt),
+        parsingErrorCount: feed.parsingErrorCount + 1,
+        lastError: message.slice(0, 500),
+        lastErrorAt: epochMs(checkedAt),
+      })
       .where(eq(feeds.id, feed.id))
       .run()
   }
 
   if (outcome.kind === 'not-modified') {
-    db.update(feeds).set({ checkedAt: outcome.fetchedAt }).where(eq(feeds.id, feed.id)).run()
+    db.update(feeds)
+      .set({ checkedAt: outcome.fetchedAt, lastError: null, lastErrorAt: null })
+      .where(eq(feeds.id, feed.id))
+      .run()
     return { kind: 'not-modified', freshnessMs: outcome.freshnessMs }
   }
 
   if (outcome.kind === 'error') {
-    bumpErrors(outcome.fetchedAt)
+    bumpErrors(outcome.fetchedAt, outcome.message)
     return { kind: 'error', message: outcome.message }
   }
 
@@ -87,7 +93,7 @@ export function ingestFeedOutcome(opts: {
   try {
     parsed = parseFeedBody(outcome.body, feed.feedUrl, { now })
   } catch (error) {
-    bumpErrors(outcome.fetchedAt)
+    bumpErrors(outcome.fetchedAt, String(error))
     return { kind: 'error', message: String(error) }
   }
 
@@ -117,7 +123,6 @@ export function ingestFeedOutcome(opts: {
             hash: item.hash,
             title: item.title,
             url: item.url,
-            commentsUrl: item.commentsUrl,
             author: item.author,
             content: item.content,
             publishedAt: item.publishedAt,
@@ -127,7 +132,6 @@ export function ingestFeedOutcome(opts: {
             starred: false,
             readingTime: estimateReadingTime(item.content),
             tags: item.tags,
-            language: item.language,
           })
           .run()
         syncEntrySearch(sqlite, null, searchRowOf(sqlite, id))
@@ -144,11 +148,9 @@ export function ingestFeedOutcome(opts: {
           .set({
             title: item.title,
             url: item.url,
-            commentsUrl: item.commentsUrl,
             author: item.author,
             content: item.content,
             tags: item.tags,
-            language: item.language,
             changedAt: epochMs(now),
             ...(existing.content !== item.content ? { readingTime: estimateReadingTime(item.content) } : {}),
           })
@@ -163,6 +165,8 @@ export function ingestFeedOutcome(opts: {
       .set({
         checkedAt: outcome.fetchedAt,
         parsingErrorCount: 0,
+        lastError: null,
+        lastErrorAt: null,
         etagHeader: outcome.etag,
         lastModifiedHeader: outcome.lastModified,
       })

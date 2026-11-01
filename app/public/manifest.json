@@ -1,12 +1,20 @@
 {
-  "name": "Reader",
+  "id": "/",
+  "name": "Miniflux Reader",
   "short_name": "Reader",
+  "description": "A focused reader for your self-hosted Miniflux subscriptions.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "en",
+  "dir": "ltr",
   "background_color": "#fafafa",
-  "theme_color": "#ffffff",
+  "theme_color": "#0e7490",
   "icons": [
-    { "src": "/favicon.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "/favicon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

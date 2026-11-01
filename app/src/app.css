@@ -42,6 +42,18 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Installed on a phone: keep chrome out of the notch and home indicator.
+     * The drawer is fixed, so it corrects its own insets below. */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+  }
+  @media (max-width: 47.99rem) {
+    .app-sidebar {
+      top: env(safe-area-inset-top);
+      bottom: env(safe-area-inset-bottom);
+      padding-left: max(0.5rem, env(safe-area-inset-left));
+      padding-right: max(0.5rem, env(safe-area-inset-right));
+    }
   }
 
   button,

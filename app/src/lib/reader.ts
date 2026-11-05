@@ -41,6 +41,7 @@ import {
 import type { EntrySummary, FeedPanelResult, ViewCursor } from '../shared/types'
 import { compareTitlesCI, computeUnreadCount } from '../shared/util'
 import { navTarget, scrollRoot, scrollToEntry } from './nav'
+import { checkVersion } from './version'
 
 /** One screenful; scrolling asks for another. */
 const PAGE_SIZE = 100
@@ -102,9 +103,18 @@ const statusOf = (error: unknown): number | null => {
 }
 
 /** What to tell the reader when a write is rejected. */
-export const describeWriteFailure = (error: unknown, what: string): string => {
+export const describeWriteFailure = (
+  error: unknown,
+  what: string,
+  options: { staleClient?: boolean } = {},
+): string => {
   if (statusOf(error) === 401) return 'Your session expired. Sign in again to keep saving.'
   if (statusOf(error) === 403) return `You cannot ${what}.`
+  // The server answered, so this is not a fault to diagnose: this document is
+  // from an older build than the server and no longer speaks its protocol.
+  // (Checked before the generic text because that text would blame the write.)
+  if (options.staleClient)
+    return `Could not ${what}. The reader was updated — reload to continue.`
   return `Could not ${what}. Nothing was saved.`
 }
 
@@ -303,6 +313,10 @@ export const createReader = (filter: () => EntriesFilter) => {
   /**
    * Run a write. A rejection is reported; the optimistic guesses are already
    * back where they were, because those belong to the framework.
+   *
+   * A rejection that coincides with a different server build is a stale client,
+   * not a failed write: say so, and let the shell offer the reload. Asking the
+   * version endpoint costs one small request, and only on failure.
    */
   const runWrite = async (what: string, work: () => Promise<unknown>): Promise<boolean> => {
     try {
@@ -310,7 +324,8 @@ export const createReader = (filter: () => EntriesFilter) => {
       setWriteError(null)
       return true
     } catch (error) {
-      setWriteError(describeWriteFailure(error, what))
+      const staleClient = await checkVersion()
+      setWriteError(describeWriteFailure(error, what, { staleClient }))
       return false
     }
   }
@@ -606,6 +621,9 @@ export const createReader = (filter: () => EntriesFilter) => {
   // reset writes the projection's own inputs.
   createEffect(viewKey, () => {
     resetPrefetch()
+    // The reader owns this page, and this page is gone. An error banner about a
+    // write in the previous view is not news on a new one.
+    setWriteError(null)
     setSession((draft) => {
       draft.userHasScrolled = false
       // Write only what changes: a fresh `[]` invalidates the list's derive,

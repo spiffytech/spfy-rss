@@ -26,4 +26,17 @@ describe('describeWriteFailure', () => {
       'session expired',
     )
   })
+
+  test('says the client is stale when the version check says so', () => {
+    const message = describeWriteFailure(new Error('unknown server function'), 'mark that read', {
+      staleClient: true,
+    })
+    expect(message).toBe('Could not mark that read. The reader was updated — reload to continue.')
+  })
+
+  test('a stale client does not hide a genuinely forbidden write', () => {
+    expect(
+      describeWriteFailure(new Response('', { status: 403 }), 'rename that', { staleClient: true }),
+    ).toBe('You cannot rename that.')
+  })
 })

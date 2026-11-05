@@ -19,6 +19,7 @@ process.env.SESSION_SECRET = 'cache-policy'
 
 const { default: middleware } = await import('../src/middleware')
 const { handleApiRoute } = await import('../src/api-routes')
+const { BUILD_ID } = await import('../src/shared/build')
 const { signSession } = await import('../src/server/auth')
 const { openDatabase } = await import('../src/server/db')
 
@@ -123,6 +124,19 @@ test('health is never cached: a stale 200 would mask an outage', async () => {
 
   const scheduler = await api('/health/scheduler', false)
   expect(scheduler?.headers.get('cache-control')).toBe('no-store')
+})
+
+test('the build id is public and uncached, and health reports it', async () => {
+  const version = await api('/api/version', false)
+  expect(version?.status).toBe(200)
+  expect(version?.headers.get('cache-control')).toBe('no-store')
+  const body = (await version?.json()) as { buildId: string }
+  expect(body.buildId).toBe(BUILD_ID)
+
+  // Health carries the same id, so "is the deploy live?" is answerable from
+  // outside the box rather than inferred from an image tag.
+  const health = await api('/health', false)
+  expect(((await health?.json()) as { buildId: string }).buildId).toBe(BUILD_ID)
 })
 
 test('OPML is private and never stored', async () => {

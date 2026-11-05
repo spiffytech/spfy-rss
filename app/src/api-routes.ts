@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 
 import type { SessionUser } from './server/auth'
+import { BUILD_ID } from './shared/build'
 import type { FeedId } from './shared/ids'
 import { appDb } from './server/db-app'
 import { feedIcons, feeds, icons } from './server/db/schema'
@@ -42,6 +43,10 @@ export const handleApiRoute = async (
 
   if (path === '/health' && request.method === 'GET') return healthResponse()
   if (path === '/health/scheduler' && request.method === 'GET') return schedulerHealthResponse()
+  // Which build this server is. Unauthenticated on purpose: it is a nonce with
+  // no information in it beyond "same as yours or not", and an open client has
+  // to be able to ask before it can tell you it is stale.
+  if (path === '/api/version' && request.method === 'GET') return json({ buildId: BUILD_ID })
   if (path === '/opml' && request.method === 'GET') return opmlResponse(context.user)
 
   if (path.startsWith('/api/websub/')) return webSubResponse(request, url)
@@ -64,6 +69,13 @@ const staleAfterMinutes = (): number => {
 
 const toResponse = (report: HealthReport): Response => json(report.body, { status: report.status })
 
+/** The build this process is serving, so "what is deployed?" is answerable from
+ *  outside the box instead of inferred from an image tag. */
+const withBuildId = (report: HealthReport): HealthReport => ({
+  ...report,
+  body: { ...report.body, buildId: BUILD_ID },
+})
+
 /**
  * Liveness: can this process serve, and does its database answer? That is what a
  * container healthcheck is allowed to act on — restarting does not fix a lagging
@@ -77,7 +89,7 @@ const healthResponse = (): Response => {
   }
   const report = livenessReport(probe, readHeartbeat(), staleAfterMinutes())
   if (report.status !== 200) console.error('health: database probe failed')
-  return toResponse(report)
+  return toResponse(withBuildId(report))
 }
 
 /**
@@ -87,7 +99,7 @@ const healthResponse = (): Response => {
  * choice, not a fault.
  */
 const schedulerHealthResponse = (): Response =>
-  toResponse(schedulerReport(readHeartbeat(), staleAfterMinutes()))
+  toResponse(withBuildId(schedulerReport(readHeartbeat(), staleAfterMinutes())))
 
 /**
  * OPML export. Authenticated like the reader itself: it is a complete map of

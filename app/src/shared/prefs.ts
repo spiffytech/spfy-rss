@@ -17,8 +17,8 @@ export type FeedPrefs = {
   viewMode?: 'expanded' | 'list'
   sort?: 'oldest' | 'newest'
   hideReadItems?: boolean
-  /** Hand-picked: this feed's link appears on the home page. Orthogonal to
-   *  category — a feed is favorited where it is, nothing moves. */
+  /** Hand-picked: this feed's link appears on the home page. Its category stays
+   *  unchanged; the sidebar sorts it ahead of non-favorites in that category. */
   favorite?: boolean
 }
 

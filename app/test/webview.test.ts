@@ -934,7 +934,7 @@ it("the comic rewrite leaves other domains alone", async () => {
 
 // Runs last: it adds feeds (with one unread item each, so the sidebar shows
 // them) to assert the rendered order.
-it("the sidebar sorts feeds case-insensitively", async () => {
+it("the sidebar puts favorites first, then sorts each group case-insensitively", async () => {
   const handle = openDatabase(fixtureDbPath);
   const now = epochMs(Date.now());
   for (const title of ["apple feed", "cherry feed", "Zebra feed"]) {
@@ -949,6 +949,12 @@ it("the sidebar sorts feeds case-insensitively", async () => {
          VALUES (?, (SELECT id FROM users LIMIT 1), ?, ?, ?, '<p>body</p>', ?, ?, ?)`,
       [newEntryId(now), feedId, `case-${slug}`, `${title} item`, now, now, now],
     );
+    if (title === "cherry feed" || title === "Zebra feed") {
+      handle.sqlite.run(
+        "INSERT INTO user_prefs (user_id, scope, prefs) VALUES ((SELECT id FROM users LIMIT 1), ?, ?)",
+        [`feed:${feedId}`, JSON.stringify({ favorite: true })],
+      );
+    }
   }
   handle.sqlite.close();
 
@@ -958,13 +964,13 @@ it("the sidebar sorts feeds case-insensitively", async () => {
     await view.navigate(`${BASE}/`);
     const order = (await view.evaluate(
       until(`
-          const els = [...document.querySelectorAll('a[href^="/?feed="] span')]
+          const els = [...document.querySelectorAll('[data-testid="feed-panel"] a[href^="/?feed="] span')]
           return els.length >= 4 ? JSON.stringify(els.map((el) => el.textContent)) : ''
         `),
     )) as string;
     console.log("sidebar feed order:", order);
-    // Binary collation would render ['Blog', 'Zebra feed', 'apple feed', 'cherry feed'].
-    expect(JSON.parse(order)).toEqual(["apple feed", "Blog", "cherry feed", "Zebra feed"]);
+    // Both the favorites and the remaining feeds retain alphabetical order.
+    expect(JSON.parse(order)).toEqual(["cherry feed", "Zebra feed", "apple feed", "Blog"]);
   } finally {
     await view.close();
   }

@@ -24,14 +24,16 @@ export const FeedPanel = () => {
   const { cancelRename, openAddFeed, openEditFeed, refreshPanel, saveRename, startRename } = r
   const navigate = useNavigate()
 
-  // Case-insensitive order inside each folder (the server hands them over in
-  // SQLite's binary collation order, which puts every capital letter first).
+  // Favorites first, then case-insensitive alphabetical order. Grouping below
+  // preserves this order within Uncategorized and every folder.
   /** A folder's total is the sum of the feed counts under it, not a separate number. */
   const categoryUnread = (categoryId: string): number =>
     (feedsByCategory().get(categoryId) ?? []).reduce((total, feed) => total + r.counterFor(feed.id), 0)
 
   const sortedFeeds = createMemo(() =>
-    [...r.panel.feeds].sort((a, b) => compareTitlesCI(a.title, b.title)),
+    [...r.panel.feeds].sort(
+      (a, b) => Number(r.isFavorite(b.id)) - Number(r.isFavorite(a.id)) || compareTitlesCI(a.title, b.title),
+    ),
   )
 
   const uncategorizedFeeds = createMemo(() => sortedFeeds().filter((feed) => feed.categoryId === null))

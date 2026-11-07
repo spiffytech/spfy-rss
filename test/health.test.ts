@@ -25,7 +25,7 @@ test('/health is 200 while the database answers', () => {
 test('/health is 503 when the database probe throws', () => {
   const report = livenessReport(
     () => {
-      throw new Error('unable to open database file: /srv/miniflux-frontend/reader.sqlite')
+      throw new Error('unable to open database file: /srv/spfy-rss/reader.sqlite')
     },
     heartbeat(),
     5,

@@ -46,21 +46,21 @@ export const LoginPage = () => {
       >
         <div class="flex flex-col items-center gap-3 text-center">
           <svg aria-hidden="true" viewBox="0 0 32 32" class="w-14 h-14">
-            <rect width="32" height="32" rx="6" fill="#0e7490" />
+            <rect width="32" height="32" rx="6" fill="#3aafdd" />
             <text
               x="16"
-              y="22"
-              font-size="18"
+              y="20.5"
+              font-size="12.7"
               font-family="sans-serif"
               font-weight="bold"
               text-anchor="middle"
               fill="white"
             >
-              M
+              SR
             </text>
           </svg>
           <div class="flex flex-col gap-1.5">
-            <h1 class="text-lg font-semibold leading-6">Sign in to Miniflux Reader</h1>
+            <h1 class="text-lg font-semibold leading-6">Sign in to spfy rss</h1>
             <p class="text-sm text-gray-500 leading-5">
               Uses your reader username and password. Sessions are cookie-based and expire after 30
               days; signing out clears this browser's session.

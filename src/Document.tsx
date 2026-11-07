@@ -15,14 +15,11 @@ export default function Document(props: { children?: JSX.Element }) {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <title>Miniflux Reader</title>
-        <meta
-          name="description"
-          content="A focused reader for your self-hosted Miniflux subscriptions."
-        />
+        <title>spfy rss</title>
+        <meta name="description" content="A focused, self-hosted RSS reader." />
         <meta name="theme-color" content="#0e7490" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-title" content="Reader" />
+        <meta name="apple-mobile-web-app-title" content="spfy rss" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <link rel="manifest" href="/manifest.json" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />

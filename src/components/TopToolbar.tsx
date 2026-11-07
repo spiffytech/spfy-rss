@@ -42,7 +42,7 @@ export const TopToolbar = (props: { onToggleSidebar: () => void; reading: boolea
       </button>
 
       <a href="/" class="hidden md:inline shrink-0 font-semibold text-lg mr-auto">
-        Miniflux Reader
+        spfy rss
       </a>
 
       <FeedMenu />

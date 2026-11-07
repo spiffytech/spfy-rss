@@ -12,7 +12,7 @@
  *
  * The runtime image ships no source, so bundle before running it in-container:
  *   bun build scripts/decode-entity-titles.ts --target bun --outfile /tmp/x.js
- *   cat /tmp/x.js | uc -c homelab-spfy service exec -T miniflux-frontend -- \
+ *   cat /tmp/x.js | uc -c homelab-spfy service exec -T spfy-rss -- \
  *     sh -c 'cat > /tmp/x.js && bun /tmp/x.js --apply'
  */
 import { Database } from 'bun:sqlite'

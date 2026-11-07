@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Miniflux Reader",
-  "short_name": "Reader",
-  "description": "A focused reader for your self-hosted Miniflux subscriptions.",
+  "name": "spfy rss",
+  "short_name": "spfy rss",
+  "description": "A focused, self-hosted RSS reader.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

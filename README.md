@@ -1,9 +1,9 @@
-# miniflux-frontend
+# spfy rss
 
-A focused, self-hosted RSS reader for a Miniflux account — it owns its own feed
-database now: fetching, scheduling and WebSub live here, not behind the Miniflux
-API. Built with **Bun + Solid 2 (SolidStart-style server functions) + Vite +
-Tailwind 4 + SQLite (Drizzle)**.
+A focused, self-hosted RSS reader that owns its own feed database: fetching,
+scheduling and WebSub live here, not behind a Miniflux API. Built with **Bun +
+Solid 2 (SolidStart-style server functions) + Vite + Tailwind 4 + SQLite
+(Drizzle)**.
 
 ## Architecture
 

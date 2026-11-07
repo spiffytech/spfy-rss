@@ -49,4 +49,4 @@ Bun.serve({
   },
 })
 
-console.log(`Miniflux Reader listening on http://localhost:${port}`)
+console.log(`spfy rss listening on http://localhost:${port}`)

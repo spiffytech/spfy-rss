@@ -390,7 +390,7 @@ it('display pipeline sanitizes hostile HTML in a real browser', async () => {
           sections: document.querySelector('[data-testid="feed-panel"]')?.textContent?.includes('Sections') ?? false,
           hasLatest: document.querySelector('[data-testid="feed-panel"]')?.textContent?.includes('Latest') ?? false,
           hasStarred: document.querySelector('[data-testid="feed-panel"]')?.textContent?.includes('Starred') ?? false,
-          hasBrand: document.body.textContent?.includes('Miniflux Reader') ?? false,
+          hasBrand: document.body.textContent?.includes('spfy rss') ?? false,
           feedMenu: !!document.querySelector('[data-testid="feed-menu-trigger"]'),
           bodyOverflow: getComputedStyle(document.body).overflow,
           documentScrolls: (document.scrollingElement?.scrollHeight ?? 0) > window.innerHeight + 1,
@@ -532,7 +532,7 @@ it('display pipeline sanitizes hostile HTML in a real browser', async () => {
     expect(report.sections).toBe(true) // "Sections" heading
     expect(report.hasLatest).toBe(false) // no aggregate row: home is a link list
     expect(report.hasStarred).toBe(true) // Starred row
-    expect(report.hasBrand).toBe(true) // "Miniflux Reader" brand
+    expect(report.hasBrand).toBe(true) // "spfy rss" brand
     expect(report.feedMenu).toBe(true) // feed-menu trigger (per-feed options)
     // Scrolling contract: the document never scrolls; the panes do. Auto-read's
     // scroll listener, next/prev scrollToEntry and the sidebar all ride on it.

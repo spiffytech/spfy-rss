@@ -21,7 +21,7 @@
  * runs against a local file and inside the deployed container:
  *
  *   local: bun run scripts/backport-schedule.ts payload.json [dbPath]
- *   prod:  cat payload.json | uc -c homelab-spfy exec -T miniflux-frontend -- \
+ *   prod:  cat payload.json | uc -c homelab-spfy exec -T spfy-rss -- \
  *            sh -c 'cat > /tmp/backfill.ts && bun /tmp/backfill.ts'
  *          (payload on stdin; DB path from READER_DB_PATH)
  */

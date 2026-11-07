@@ -191,7 +191,7 @@ export function exportOpml(handle: ReaderHandle, userId: UserId): string {
   ]
 
   return generateOpml({
-    head: { title: 'Miniflux Reader', dateCreated: new Date() },
+    head: { title: 'spfy rss', dateCreated: new Date() },
     body: { outlines },
   })
 }

@@ -16,8 +16,8 @@ This license is not legal advice and does not create an attorney-client relation
 
 ## Credit
 
-**Name of this software:** miniflux-frontend  
-**Project home:** <https://github.com/spiffytech/rss-frontend>  
+**Name of this software:** spfy rss  
+**Project home:** <https://github.com/spiffytech/spfy-rss>  
 **Original copyright holder(s):** spiffytech
 
 ## Purpose

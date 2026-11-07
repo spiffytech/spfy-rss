@@ -2090,3 +2090,73 @@ it('the document title names the view', async () => {
     await view.close()
   }
 }, 45_000)
+
+it('a swipe right opens the mobile drawer; a left swipe closes it', async () => {
+  const view = new Bun.WebView({ width: 420, height: 800 })
+  try {
+    await signIn(view)
+    restoreUnread()
+    await openFeedView(view)
+
+    const drawerWidth = `(() => {
+      const el = document.querySelector('.app-sidebar')
+      return el ? Math.round(el.getBoundingClientRect().width) : -1
+    })()`
+    /** A synthetic pointer drag across the reading pane. Constructed
+     *  PointerEvents default `isPrimary` to false, which the handler rejects. */
+    const swipe = (fromX: number, toX: number) => `
+      (() => {
+        const target = document.querySelector('[data-testid="entry-scroll"]')
+        window.getSelection()?.removeAllRanges()
+        const fire = (type, x, buttons) => target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, pointerId: 1, isPrimary: true,
+          pointerType: 'touch', button: 0, buttons, clientX: x, clientY: 200,
+        }))
+        fire('pointerdown', ${fromX}, 1)
+        fire('pointermove', (${fromX} + ${toX}) / 2, 1)
+        fire('pointermove', ${toX}, 1)
+        fire('pointerup', ${toX}, 0)
+        return true
+      })()
+    `
+
+    expect(await view.evaluate(drawerWidth)).toBe(0)
+
+    // A vertical drag is scrolling, not a drawer gesture.
+    await view.evaluate(`
+      (() => {
+        const target = document.querySelector('[data-testid="entry-scroll"]')
+        const fire = (type, x, y, buttons) => target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, pointerId: 1, isPrimary: true,
+          pointerType: 'touch', button: 0, buttons, clientX: x, clientY: y,
+        }))
+        fire('pointerdown', 120, 100, 1)
+        fire('pointermove', 140, 300, 1)
+        fire('pointerup', 140, 300, 0)
+        return true
+      })()
+    `)
+    expect(await view.evaluate(drawerWidth)).toBe(0)
+
+    await view.evaluate(swipe(120, 280))
+    const opened = (await view.evaluate(
+      until(
+        `const el = document.querySelector('.app-sidebar')
+         return el && el.getBoundingClientRect().width > 0 ? Math.round(el.getBoundingClientRect().width) : 0`,
+      ),
+    )) as number
+    expect(opened).toBeGreaterThan(200)
+
+    // Swiping left on the open drawer puts it away again.
+    await view.evaluate(swipe(280, 120))
+    const closed = (await view.evaluate(
+      until(
+        `const el = document.querySelector('.app-sidebar')
+         return el && el.getBoundingClientRect().width === 0 ? 1 : 0`,
+      ),
+    )) as number
+    expect(closed).toBe(1)
+  } finally {
+    await view.close()
+  }
+}, 60_000)

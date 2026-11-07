@@ -13,6 +13,7 @@ import { Home } from '../components/Home'
 import { EntryList } from '../components/EntryList'
 import { watchScroll } from '../lib/observers'
 import { installScrollMemory } from '../lib/scroll-memory'
+import { attachSwipe } from '../lib/swipe'
 import { TopToolbar } from '../components/TopToolbar'
 
 /**
@@ -69,12 +70,23 @@ export const ReaderPage = () => {
       viewKey: r.viewKey,
       ensureEntry: r.ensureEntry,
     })
+    // The drawer only exists on mobile; on desktop the sidebar is a column
+    // that is always there, so the same gesture must not write the signal.
+    const stopSwipe = attachSwipe({
+      onSwipeRight: () => {
+        if (!isDesktop()) setSidebarOpen(true)
+      },
+      onSwipeLeft: () => {
+        if (!isDesktop()) setSidebarOpen(false)
+      },
+    })
 
     return () => {
       stopKeys()
       stopIdle()
       stopScroll()
       stopMemory()
+      stopSwipe()
       mql.removeEventListener('change', onChange)
     }
   })

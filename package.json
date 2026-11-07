@@ -27,22 +27,22 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@solidjs/router": "2.0.0-next.42",
-    "@solidjs/web": "2.0.0-rc.18",
-    "dompurify": "^3.4.16",
+    "@solidjs/router": "2.0.0-next.43",
+    "@solidjs/web": "2.0.0-rc.21",
+    "dompurify": "^3.4.17",
     "drizzle-orm": "^0.45.4",
     "feedsmith": "^3.0.1",
     "lite-youtube-embed": "^0.3.4",
-    "solid-js": "2.0.0-rc.18",
-    "zod": "^4.6.5"
+    "solid-js": "2.0.0-rc.21",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@solidjs/vite-plugin": "3.0.0-next.51",
-    "@tailwindcss/cli": "^4.3.3",
-    "@types/bun": "^1.4.2",
+    "@solidjs/vite-plugin": "3.0.0-next.56",
+    "@tailwindcss/cli": "^4.3.4",
+    "@types/bun": "^1.4.4",
     "drizzle-kit": "^0.31.11",
     "oxlint": "^1.91.0",
-    "tailwindcss": "^4.3.3",
+    "tailwindcss": "^4.3.4",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "8.3.5"
   }

@@ -1758,3 +1758,335 @@ it('a rejected mark-read puts the row and the counter back', async () => {
     await view.close()
   }
 }, 60_000)
+
+/**
+ * Point the fixture feed at known view prefs.
+ *
+ * Earlier tests leave `hideReadItems: false` on it (they need read rows visible),
+ * and these two depend on the default: read rows leave the screen when the view
+ * is re-read.
+ */
+const setFixturePrefs = (prefs: Record<string, unknown>): void => {
+  const handle = openDatabase(fixtureDbPath)
+  const feed = handle.sqlite.query('SELECT user_id FROM feeds LIMIT 1').get() as { user_id: string }
+  handle.sqlite.run(
+    'INSERT INTO user_prefs (user_id, scope, prefs) VALUES (?, ?, ?) ON CONFLICT (user_id, scope) DO UPDATE SET prefs = excluded.prefs',
+    [feed.user_id, `feed:${fixtureFeedId()}`, JSON.stringify(prefs)],
+  )
+  handle.sqlite.close()
+}
+
+/** Add one unread entry to the fixture feed, as a feed poll would. */
+const insertArrival = (title: string): string => {
+  const handle = openDatabase(fixtureDbPath)
+  const feed = handle.sqlite
+    .query(
+      'SELECT id, user_id, (SELECT max(published_at) FROM entries WHERE feed_id = feeds.id) AS newest FROM feeds LIMIT 1',
+    )
+    .get() as { id: string; user_id: string; newest: number }
+  const now = epochMs(Date.now())
+  // After the newest row, whichever clock ran first — the fixture seeds entries
+  // two minutes into its own future.
+  const publishedAt = epochMs(Math.max(now, feed.newest) + 5_000)
+  const id = newEntryId(now)
+  handle.sqlite.run(
+    `INSERT INTO entries (id, user_id, feed_id, hash, title, content, published_at, created_at, changed_at)
+     VALUES (?, ?, ?, ?, ?, '<p>arrived</p>', ?, ?, ?)`,
+    [id, feed.user_id, feed.id, `arrival-${id}`, title, publishedAt, now, now],
+  )
+  handle.sqlite.close()
+  return id
+}
+
+/**
+ * Wait for a page-side predicate without page timers.
+ *
+ * After the virtual-time skip below the page's own `setTimeout` no longer fires,
+ * so the usual `until()` helper would never tick. Poll from Bun instead.
+ */
+const waitInPage = async (
+  view: Bun.WebView,
+  script: string,
+  timeoutMs = 10_000,
+): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await view.evaluate(script)) return true
+    await Bun.sleep(100)
+  }
+  return false
+}
+
+/** How many entries the fixture feed currently has. */
+const fixtureEntryCount = (): number => {
+  const handle = openDatabase(fixtureDbPath)
+  const n = (
+    handle.sqlite
+      .query('SELECT count(*) AS n FROM entries WHERE feed_id = ?')
+      .get(fixtureFeedId()) as {
+      n: number
+    }
+  ).n
+  handle.sqlite.close()
+  return n
+}
+
+/**
+ * Scroll until the window holds every row — the precondition for a tail append.
+ *
+ * Scroll the sentinel into view rather than to the absolute bottom: the list's
+ * trailing 100dvh padding means a jump to `scrollHeight` parks the sentinel
+ * *above* the viewport, where IntersectionObserver never reports it.
+ */
+const loadAllRows = async (view: Bun.WebView): Promise<{ rows: number; total: number }> => {
+  const total = fixtureEntryCount()
+  let previous = -1
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await view.evaluate(`(() => {
+      const el = document.querySelector('[data-testid="entry-scroll"]')
+      const sentinel = document.getElementById('entry-sentinel')
+      const sentinelTop = sentinel.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+      el.scrollTop = sentinelTop - el.clientHeight / 2
+      return true
+    })()`)
+    await Bun.sleep(300)
+    const rows = (await view.evaluate(
+      'document.querySelectorAll("[data-entry-id]").length',
+    )) as number
+    if (rows >= total && rows === previous) return { rows, total }
+    previous = rows
+  }
+  return { rows: previous, total }
+}
+
+/** The unread count the sidebar shows for one feed. */
+const sidebarCount = async (view: Bun.WebView, feedId: string): Promise<number> =>
+  (await view.evaluate(`(() => {
+    const a = document.querySelector('[data-testid="feed-panel"] a[href="/?feed=${feedId}"]')
+    const c = a && a.closest('li') && a.closest('li').querySelector('[data-testid="feed-count"]')
+    return c ? Number(c.textContent) : -1
+  })()`)) as number
+
+it('tapping the active feed re-opens the view, so read rows leave the screen', async () => {
+  // Marking read deliberately leaves the row on screen ("a row you read cannot
+  // vanish from under you"). Tapping the feed you are already on is the old
+  // escape hatch: a fresh navigation, which re-reads and drops read rows.
+  restoreUnread()
+  setFixturePrefs({ hideReadItems: true, sort: 'oldest' })
+  const feedId = fixtureFeedId()
+  const view = new Bun.WebView({ width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view, feedId)
+
+    const first = (await view.evaluate(`
+      (() => {
+        const card = document.querySelector('[data-entry-id]')
+        const button = card && card.querySelector('button[aria-label="Mark read"]')
+        if (!card || !button) return null
+        button.click()
+        return card.getAttribute('data-entry-id')
+      })()
+    `)) as string | null
+    expect(first).not.toBeNull()
+
+    // The optimistic write paints the row read, and the row stays.
+    const painted = (await view.evaluate(
+      until(
+        `const el = document.querySelector('[data-entry-id="${first}"]'); return el && el.className.includes('bg-gray-100') ? 1 : 0`,
+      ),
+    )) as number
+    expect(painted).toBe(1)
+
+    await view.click(`[data-testid="feed-panel"] a[href="/?feed=${feedId}"]`)
+
+    const dropped = (await view.evaluate(
+      until(`return document.querySelector('[data-entry-id="${first}"]') ? 0 : 1`),
+    )) as number
+    expect(dropped).toBe(1)
+
+    const after = (await view.evaluate(`({
+      search: location.search,
+      top: document.querySelector('[data-testid="entry-scroll"]').scrollTop,
+      rows: document.querySelectorAll('[data-entry-id]').length,
+    })`)) as { search: string; top: number; rows: number }
+    expect(after.search).toBe(`?feed=${feedId}`) // in place, not a navigation
+    expect(after.top).toBe(0)
+    expect(after.rows).toBeGreaterThan(0)
+  } finally {
+    await view.close()
+  }
+}, 60_000)
+
+it('a poll appends arrivals to an oldest-first window without moving it', async () => {
+  // The report: the sidebar polled and showed unreads, while the item list said
+  // there were none. In an oldest-first view arrivals land after the last row, so
+  // the list only has to ask for the page beyond the tail.
+  restoreUnread()
+  setFixturePrefs({ hideReadItems: true, sort: 'oldest' })
+  const feedId = fixtureFeedId()
+
+  // Chrome's virtual time is what makes this test fast: the 60s idle poll fires
+  // as soon as the budget is granted. cdp() is Chrome-only, so ask for it.
+  const view = new Bun.WebView({ backend: 'chrome', width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view, feedId)
+
+    // Put the window at its end — the state a tail append starts from.
+    const { rows, total } = await loadAllRows(view)
+    expect(rows).toBe(total)
+
+    const arrival = insertArrival('Poll arrival')
+    const before = (await view.evaluate(`({
+      top: document.querySelector('[data-testid="entry-scroll"]').scrollTop,
+      count: document.querySelectorAll('[data-entry-id]').length,
+    })`)) as { top: number; count: number }
+
+    // 65s of virtual time: one poll tick, with virtual time paused while the
+    // poll's requests are in flight.
+    await view.cdp('Emulation.setVirtualTimePolicy', {
+      policy: 'pauseIfNetworkFetchesPending',
+      budget: 65_000,
+    })
+
+    const appeared = await waitInPage(view, `!!document.getElementById('entry-${arrival}') ? 1 : 0`)
+    expect(appeared).toBe(true)
+
+    const after = (await view.evaluate(`({
+      top: document.querySelector('[data-testid="entry-scroll"]').scrollTop,
+      count: document.querySelectorAll('[data-entry-id]').length,
+      search: location.search,
+    })`)) as { top: number; count: number; search: string }
+    expect(after.count).toBe(before.count + 1)
+    // Appended below the reading position: nothing moved.
+    expect(after.top).toBe(before.top)
+    expect(after.search).toBe(`?feed=${feedId}`)
+  } finally {
+    await view.close()
+  }
+}, 90_000)
+
+it('coming back to the tab refreshes it at once, appending oldest-first arrivals', async () => {
+  // A hidden tab does not poll (nobody can see it, and phones should not keep
+  // the radio awake); the visibility trigger is what makes it current on return.
+  // No timer is involved: the whole test runs in a couple of seconds.
+  restoreUnread()
+  setFixturePrefs({ hideReadItems: true, sort: 'oldest' })
+  const feedId = fixtureFeedId()
+  const view = new Bun.WebView({ width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view, feedId)
+    const { rows, total } = await loadAllRows(view)
+    expect(rows).toBe(total)
+
+    const arrival = insertArrival('Return arrival')
+    // A real visibilitychange can fire while the document settles; wait out the
+    // trigger's 1s debounce so this one is not folded into it.
+    await Bun.sleep(1_100)
+    await view.evaluate(`(document.dispatchEvent(new Event('visibilitychange')), true)`)
+
+    const appeared = (await view.evaluate(
+      until(`return document.getElementById('entry-${arrival}') ? 1 : 0`, 5_000),
+    )) as number
+    expect(appeared).toBe(1)
+    expect(await sidebarCount(view, feedId)).toBeGreaterThan(0)
+  } finally {
+    await view.close()
+  }
+}, 60_000)
+
+it('a newest-first view takes the new count on return but leaves the list alone', async () => {
+  restoreUnread()
+  setFixturePrefs({ hideReadItems: true, sort: 'newest' })
+  const feedId = fixtureFeedId()
+  const view = new Bun.WebView({ width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view, feedId)
+    const before = await sidebarCount(view, feedId)
+    expect(before).toBeGreaterThan(0)
+
+    const arrival = insertArrival('Newest arrival')
+    // Wait out any visibilitychange the browser fired while the page settled.
+    await Bun.sleep(1_100)
+    await view.evaluate(`(document.dispatchEvent(new Event('visibilitychange')), true)`)
+
+    const count = (await view.evaluate(
+      until(
+        `const a = document.querySelector('[data-testid="feed-panel"] a[href="/?feed=${feedId}"]')
+         const c = a && a.closest('li') && a.closest('li').querySelector('[data-testid="feed-count"]')
+         return c && Number(c.textContent) === ${before + 1} ? Number(c.textContent) : 0`,
+        5_000,
+      ),
+    )) as number
+    expect(count).toBe(before + 1)
+    // Newest-first arrivals land at the top, where inserting would move the
+    // reader: the list waits for an explicit re-open.
+    expect(await view.evaluate(`document.getElementById('entry-${arrival}') ? 1 : 0`)).toBe(0)
+  } finally {
+    await view.close()
+  }
+}, 60_000)
+
+it('a failed poll keeps the last sidebar snapshot and says it is offline', async () => {
+  restoreUnread()
+  setFixturePrefs({ hideReadItems: true, sort: 'oldest' })
+  const feedId = fixtureFeedId()
+  const view = new Bun.WebView({ width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view, feedId)
+
+    await view.evaluate(`(() => {
+      window.__realFetch = window.fetch
+      window.fetch = (...args) =>
+        String(args[0]).includes('viewPanel')
+          ? Promise.resolve(new Response('nope', { status: 500 }))
+          : window.__realFetch(...args)
+      return true
+    })()`)
+    // Wait out any visibilitychange the browser fired while the page settled.
+    await Bun.sleep(1_100)
+    await view.evaluate(`(document.dispatchEvent(new Event('visibilitychange')), true)`)
+
+    const shown = (await view.evaluate(
+      until(`return document.querySelector('[data-testid="offline"]') ? 1 : 0`, 5_000),
+    )) as number
+    expect(shown).toBe(1)
+    // The snapshot is still there — a failed read is not a failed screen.
+    expect(await sidebarCount(view, feedId)).toBeGreaterThan(0)
+
+    await view.evaluate(`(window.fetch = window.__realFetch, true)`)
+    // The resume triggers debounce for a second; cross it before asking again.
+    await Bun.sleep(1_100)
+    await view.evaluate(`(document.dispatchEvent(new Event('visibilitychange')), true)`)
+    const cleared = (await view.evaluate(
+      until(`return document.querySelector('[data-testid="offline"]') ? 0 : 1`, 5_000),
+    )) as number
+    expect(cleared).toBe(1)
+  } finally {
+    await view.close()
+  }
+}, 60_000)
+
+it('the document title names the view', async () => {
+  const view = new Bun.WebView({ width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view)
+    const title = (await view.evaluate(
+      until(`return document.title.includes('Blog') ? document.title : ''`, 5_000),
+    )) as string
+    expect(title).toBe('Blog — spfy rss')
+
+    await view.navigate(`${BASE}/`)
+    const home = (await view.evaluate(
+      until(`return document.title === 'spfy rss' ? document.title : ''`, 5_000),
+    )) as string
+    expect(home).toBe('spfy rss')
+  } finally {
+    await view.close()
+  }
+}, 45_000)

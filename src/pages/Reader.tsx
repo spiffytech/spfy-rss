@@ -79,6 +79,16 @@ export const ReaderPage = () => {
     }
   })
 
+  // The title names the view, so a row of tabs — or the installed app — can be
+  // told apart. Effects do not run during SSR, so the static document title
+  // stays for the first paint.
+  createEffect(
+    () => (hasView() ? `${r.currentTitle()} — spfy rss` : 'spfy rss'),
+    (title) => {
+      document.title = title
+    },
+  )
+
   // Picking any sidebar entry closes the drawer. The data follows the URL on its
   // own — the projection is keyed on the filter — so this listener only closes
   // the drawer and needs no refetch of its own.
@@ -203,6 +213,18 @@ export const ReaderPage = () => {
                 </button>
               </div>
             )}
+          </Show>
+
+          <Show when={r.offline()}>
+            <div
+              role="status"
+              data-testid="offline"
+              class="fixed inset-x-0 bottom-16 z-50 flex justify-center px-3 pointer-events-none"
+            >
+              <span class="pointer-events-auto rounded-full border border-line bg-white/95 px-3 py-1.5 text-xs text-muted shadow-lg">
+                Can’t reach the server — retrying
+              </span>
+            </div>
           </Show>
 
           <div class="relative grid grid-cols-1 md:grid-cols-[var(--sidebar-w)_1fr] gap-x-3 min-h-0 overflow-hidden">

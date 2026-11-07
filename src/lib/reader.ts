@@ -157,6 +157,14 @@ export const createReader = (filter: () => EntriesFilter) => {
    */
   let prefetched: { entries: EntrySummary[]; nextCursor: ViewCursor | null; from: string } | null =
     null
+  /**
+   * A page staged for a window the server says has ended (`nextCursor` null).
+   *
+   * New entries in an oldest-first view land after the last row, so they can be
+   * fetched from the keyset cursor that row carries. Staged here, consumed by
+   * the derive, cleared with the prefetch it belongs to.
+   */
+  let tailAppend: ViewCursor | null = null
   let prefetching = false
   let prefetchToken = 0
   const cursorKey = (cursor: ViewCursor | null): string => (cursor ? JSON.stringify(cursor) : '')
@@ -165,6 +173,7 @@ export const createReader = (filter: () => EntriesFilter) => {
     prefetchToken++
     prefetching = false
     prefetched = null
+    tailAppend = null
   }
 
   /**
@@ -213,21 +222,30 @@ export const createReader = (filter: () => EntriesFilter) => {
         const rows = draft.entries
         let count = rows.length
         let cursor = wire(draft.nextCursor)
+        // A page staged for a window the server reported as ended. Readings of
+        // the plain variables above are untracked, so take the snapshot here.
+        let tail = tailAppend === null ? null : wire(tailAppend)
         if (count === 0) {
           const first = await api.viewEntries(wire(filter()), null)
           draft.entries = snapshot(first.entries)
           draft.nextCursor = first.nextCursor
         } else {
-          while (count < wanted && cursor) {
-            const ahead = prefetched && prefetched.from === cursorKey(cursor) ? prefetched : null
+          while (count < wanted) {
+            // Continue from the server's cursor, or — once it has run out — from
+            // the staged tail page an idle poll fetched for precisely that spot.
+            const at = cursor ?? tail
+            const ahead = prefetched && prefetched.from === cursorKey(at) ? prefetched : null
             if (ahead) {
               prefetched = null
+              tail = null
+              tailAppend = null
               rows.push(...snapshot(ahead.entries))
               draft.nextCursor = ahead.nextCursor
               cursor = wire(ahead.nextCursor)
               count += ahead.entries.length
               continue
             }
+            if (!cursor) break
             const next = await api.viewEntries(wire(filter()), wire(cursor))
             rows.push(...snapshot(next.entries))
             draft.nextCursor = next.nextCursor
@@ -250,16 +268,26 @@ export const createReader = (filter: () => EntriesFilter) => {
    * 409, which the RPC client throws as "not part of the deployment". Unhandled,
    * that escaped as an uncaught exception on every idle poll. Ask the version
    * endpoint instead: keep the snapshot already on screen and let the shell show
-   * its reload notice. A read that fails for any other reason still throws.
+   * its reload notice.
+   *
+   * Any other failed read is a connectivity problem, not news: keep the last
+   * snapshot and say we are offline until the next good read. Without that, a
+   * blip made every poll reject into nothing.
    */
+  const [offline, setOffline] = createSignal(false)
   let lastPanel: FeedPanelResult | null = null
   const [panel, setPanel] = createOptimisticStore<FeedPanelResult>(async () => {
     try {
       const next = await api.viewPanel(currentFeedId())
       lastPanel = next
+      setOffline(false)
       return next
     } catch (error) {
       if (lastPanel !== null && (await checkVersion())) return lastPanel
+      if (lastPanel !== null) {
+        setOffline(true)
+        return lastPanel
+      }
       throw error
     }
   }, null)
@@ -332,6 +360,12 @@ export const createReader = (filter: () => EntriesFilter) => {
 
   const [writeError, setWriteError] = createSignal<string | null>(null)
 
+  /** Writes in flight, and a poll that came due while one was running. */
+  let writesInFlight = 0
+  let pollDeferred = false
+  /** Set by `startIdleRefresh`; lets a settling write re-arm a deferred poll. */
+  let runDeferredPoll: (() => void) | null = null
+
   /**
    * Run a write. A rejection is reported; the optimistic guesses are already
    * back where they were, because those belong to the framework.
@@ -339,8 +373,14 @@ export const createReader = (filter: () => EntriesFilter) => {
    * A rejection that coincides with a different server build is a stale client,
    * not a failed write: say so, and let the shell offer the reload. Asking the
    * version endpoint costs one small request, and only on failure.
+   *
+   * The in-flight count is what keeps the idle poll from racing a write: a poll
+   * that lands after the write's own `refresh(panel)` could commit pre-write
+   * counters over it (the optimistic guess only covers the transition, it does
+   * not order two reads). The poll defers instead, and the last write re-arms it.
    */
   const runWrite = async (what: string, work: () => Promise<unknown>): Promise<boolean> => {
+    writesInFlight++
     try {
       await work()
       setWriteError(null)
@@ -349,6 +389,12 @@ export const createReader = (filter: () => EntriesFilter) => {
       const staleClient = await checkVersion()
       setWriteError(describeWriteFailure(error, what, { staleClient }))
       return false
+    } finally {
+      writesInFlight--
+      if (writesInFlight === 0 && pollDeferred) {
+        pollDeferred = false
+        runDeferredPoll?.()
+      }
     }
   }
 
@@ -639,10 +685,17 @@ export const createReader = (filter: () => EntriesFilter) => {
       return false
     })
 
-  // A new view means a new list. Keyed on the URL filter (a string), not on the
-  // projection's value: that would re-fire on every read and loop, because the
-  // reset writes the projection's own inputs.
-  createEffect(viewKey, () => {
+  /**
+   * Start this view over, exactly as opening it fresh from the sidebar would.
+   *
+   * Everything the tab held for the view goes: the window and its read guesses,
+   * the rows un-read by hand, the expansion, the session's view-mode override.
+   * A `listGen` change is also what the page watches to scroll back to the top.
+   *
+   * `bumpGen` is false for the view-change effect below, which also runs once at
+   * creation: bumping there would invalidate the document the server rendered.
+   */
+  const startFreshView = (bumpGen: boolean): void => {
     resetPrefetch()
     // The reader owns this page, and this page is gone. An error banner about a
     // write in the previous view is not news on a new one.
@@ -659,9 +712,14 @@ export const createReader = (filter: () => EntriesFilter) => {
       draft.serverReadStatus = {}
       draft.serverStarred = {}
       draft.navStarted = false
-      draft.listGen = 0
+      draft.listGen = bumpGen ? draft.listGen + 1 : 0
     })
-  })
+  }
+
+  // A new view means a new list. Keyed on the URL filter (a string), not on the
+  // projection's value: that would re-fire on every read and loop, because the
+  // reset writes the projection's own inputs.
+  createEffect(viewKey, () => startFreshView(false))
 
   // ---- writes that change the view ----
 
@@ -832,43 +890,128 @@ export const createReader = (filter: () => EntriesFilter) => {
     refresh(panel)
   }
 
-  /** Re-read the list from the top (a feed's URL changed, entries may differ). */
+  /**
+   * Re-open the current view in place: a tap on the sidebar entry you are
+   * already on, or a feed whose URL just changed.
+   *
+   * This is the same reset a fresh navigation does (read rows leave the screen,
+   * arrivals show up), not merely a re-read.
+   */
   const reloadList = (): void => {
-    resetPrefetch()
-    setSession((draft) => {
-      draft.listGen++
-      draft.serverReadStatus = {}
-      draft.serverStarred = {}
-    })
+    startFreshView(true)
     refresh(page)
   }
 
   // ---- idle refresh ----
 
   let pollTimer: ReturnType<typeof setInterval> | undefined
+  let pollTriggerCleanup: (() => void) | undefined
 
   const stopIdleRefresh = (): void => {
     if (pollTimer) clearInterval(pollTimer)
     pollTimer = undefined
+    pollTriggerCleanup?.()
+    pollTriggerCleanup = undefined
+    runDeferredPoll = null
   }
 
   /**
-   * Keep the sidebar honest on a long-lived tab.
+   * Take the entries an oldest-first window is missing from its tail.
    *
-   * Polls the panel only. It used to reload the list as well when you had reached
-   * the end, which replaced the rows under you: new entries arrive at the *top*,
-   * so the window you were reading had to be pushed down or thrown away. The list
-   * now changes only when you ask it to — navigate, scroll for more, or Refresh
-   * feeds, which restarts it and takes you to the top.
+   * Arrivals in an oldest-first view land after the last row, so they append:
+   * nothing already on screen moves. A newest-first view is left alone on
+   * purpose — its arrivals land above the reading position, and that list only
+   * re-reads when you ask (tap the active feed in the sidebar).
+   *
+   * Only a window that has reached its end is considered: while `nextCursor` is
+   * non-null there are pages already queued, and scrolling is the way to them.
+   */
+  const appendArrivals = async (): Promise<void> => {
+    if (filter().search || sortOrder() !== 'oldest') return
+    if (!hasView(filter()) || page.viewKey !== viewKey()) return
+    // A fetch already owns the window; the next poll can advise.
+    if (prefetching || prefetched) return
+    if (page.nextCursor) return
+    const rows = page.entries
+    if (rows.length === 0) {
+      // An empty view has no tail to continue from: ask for page 1 again.
+      refresh(page)
+      return
+    }
+    const last = rows[rows.length - 1]!
+    const from: ViewCursor = { publishedAt: last.publishedAt, id: last.id }
+    const token = prefetchToken
+    let next
+    try {
+      next = await api.viewEntries(wire(filter()), wire(from))
+    } catch {
+      // A poll that cannot read is not the reader's news; the next one retries.
+      return
+    }
+    if (token !== prefetchToken || next.entries.length === 0) return
+    prefetched = { entries: next.entries, nextCursor: next.nextCursor, from: cursorKey(from) }
+    tailAppend = from
+    setSession((draft) => {
+      draft.wanted = Math.max(draft.wanted, rows.length + next.entries.length)
+    })
+    refresh(page)
+  }
+
+  /**
+   * Keep a long-lived tab honest.
+   *
+   * A visible tab re-reads the panel on a timer, so the sidebar counts track the
+   * server; a fully-loaded oldest-first window also takes the arrivals stored
+   * since its last poll. A newest-first window is not touched: its arrivals land
+   * at the top, where replacing rows would move the reader; re-open that view
+   * from the sidebar to pick them up.
+   *
+   * A hidden tab does not poll at all — nobody can see the counts, and a phone
+   * left in a pocket should not keep the radio awake. Coming back runs the same
+   * poll at once, so the tab is never stale on return. `pageshow` and `resume`
+   * are the browser's other "we are back" signals (bfcache restore, Android
+   * freeze); one resume can fire several, hence the debounce.
    */
   const startIdleRefresh = (): (() => void) => {
     if (pollTimer) return stopIdleRefresh
-    pollTimer = setInterval(() => {
+
+    const poll = (): void => {
       // A stale tab cannot read: every poll would 409 again. The reload notice is
       // already on screen, so stop asking until it is acted on.
       if (updateAvailable()) return
-      refresh(panel)
-    }, POLL_MS)
+      // A hidden tab catches up through the trigger below, not on the timer.
+      if (document.visibilityState !== 'visible') return
+      // A poll landing during a write could commit counters from before it.
+      // Defer; the last write to settle re-runs this.
+      if (writesInFlight > 0) {
+        pollDeferred = true
+        return
+      }
+      void refresh(panel).then(appendArrivals)
+    }
+
+    runDeferredPoll = () => {
+      if (pollTimer) poll()
+    }
+
+    let lastTrigger = 0
+    const onBack = (): void => {
+      if (document.visibilityState !== 'visible') return
+      const now = Date.now()
+      if (now - lastTrigger < 1_000) return
+      lastTrigger = now
+      poll()
+    }
+
+    pollTimer = setInterval(poll, POLL_MS)
+    document.addEventListener('visibilitychange', onBack)
+    addEventListener('pageshow', onBack)
+    document.addEventListener('resume', onBack)
+    pollTriggerCleanup = () => {
+      document.removeEventListener('visibilitychange', onBack)
+      removeEventListener('pageshow', onBack)
+      document.removeEventListener('resume', onBack)
+    }
     return stopIdleRefresh
   }
 
@@ -922,6 +1065,7 @@ export const createReader = (filter: () => EntriesFilter) => {
     saveRename,
     writeError,
     dismissWriteError,
+    offline,
     unsubscribe,
     startIdleRefresh,
   }

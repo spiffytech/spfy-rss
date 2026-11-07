@@ -16,12 +16,20 @@ import { OpmlControls } from './OpmlControls'
  *
  * Navigation is URL-first: picking a feed is a link, so the reading view's
  * identity stays in the address bar. Re-clicking the active feed is the one
- * exception — it refetches page 1 in place, because new items may have arrived
- * since the list windowed.
+ * exception — it re-opens the view in place, so read rows leave the screen and
+ * new items appear, exactly as navigating away and back would.
  */
 export const FeedPanel = () => {
   const r = useReader()
-  const { cancelRename, openAddFeed, openEditFeed, refreshPanel, saveRename, startRename } = r
+  const {
+    cancelRename,
+    openAddFeed,
+    openEditFeed,
+    refreshPanel,
+    reloadList,
+    saveRename,
+    startRename,
+  } = r
   const navigate = useNavigate()
 
   // Favorites first, then case-insensitive alphabetical order. Grouping below
@@ -154,8 +162,12 @@ export const FeedPanel = () => {
         ]}
         onClick={(event) => {
           event.preventDefault()
-          if (isActiveFeed(props.feed.id)) refreshPanel()
-          else void navigate(link({ feed: props.feed.id }))
+          if (isActiveFeed(props.feed.id)) {
+            // Already here: re-open the view. Same reset as a fresh navigation,
+            // so rows you read this session leave the screen and arrivals show.
+            reloadList()
+            refreshPanel()
+          } else void navigate(link({ feed: props.feed.id }))
         }}
       >
         <span class="flex-1 truncate">{props.feed.title}</span>
@@ -229,6 +241,13 @@ export const FeedPanel = () => {
                 'w-full text-left px-2 py-1 rounded hover:bg-gray-100 flex justify-between items-center',
                 { 'bg-gray-100': r.filter().starred === true },
               ]}
+              onClick={(event) => {
+                if (r.filter().starred !== true) return
+                // The same in-place re-open the active feed gets.
+                event.preventDefault()
+                reloadList()
+                refreshPanel()
+              }}
             >
               <span>Starred</span>
             </a>

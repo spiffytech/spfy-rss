@@ -106,7 +106,7 @@ export const observeSentinel = (
     (batch) => {
       for (const item of batch) if (item.isIntersecting) void fire()
     },
-    { root: scrollContainer(), rootMargin: '0px 0px 400px 0px', threshold: 0 },
+    { root: scrollContainer(), rootMargin: '0px 0px 2000px 0px', threshold: 0 },
   )
   sentinel.observe(node)
   return () => sentinel.disconnect()

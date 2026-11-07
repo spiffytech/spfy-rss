@@ -1,6 +1,6 @@
 # External feed scheduler
 
-> **Ported into the reader (this repo's `app/`, `src/server/scheduler/`).** The
+> **Ported into the reader (this repo, `src/server/scheduler/`).** The
 > document below is kept as the design record of the original supervisor; the
 > port's deltas are:
 >
@@ -12,7 +12,7 @@
 >   `entryFrequencyIntervalMinutes` are gone: `Retry-After` and `Cache-Control` /
 >   `Expires` are read from the response and persisted as a floor in
 >   `feeds.fetch_after_at`. That closes the "short cache hints are unrecoverable"
->   limit under *Known limits* — it existed only because Miniflux did the fetching.
+>   limit under _Known limits_ — it existed only because Miniflux did the fetching.
 > - **No advisory lock, no `prev`/`hints` maps.** One process owns the SQLite
 >   file, and authorship of `next_check_at` is a fact rather than an inference —
 >   the cleanup the old runner's TODO asked for.
@@ -24,17 +24,17 @@
 >   overrides), `/health/scheduler` 503 on a stale tick, `.scheduler-off`
 >   beside the DB pauses it, `SCHEDULER_ENABLED=0` disables it.
 
-Decides *when* each feed is fetched. Miniflux stays the fetcher, parser and
+Decides _when_ each feed is fetched. Miniflux stays the fetcher, parser and
 store; we only write `feeds.next_check_at`. Not intended for upstream.
 
 ## Health
 
 Two URLs, because they answer different questions:
 
-| URL | Question | 503 when |
-|---|---|---|
-| `/health` | should this container be restarted? | the database does not answer |
-| `/health/scheduler` | is the poller keeping up? | the last completed tick is older than `SCHEDULER_MAX_TICK_AGE_MINUTES`, or none ever completed |
+| URL                 | Question                            | 503 when                                                                                       |
+| ------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `/health`           | should this container be restarted? | the database does not answer                                                                   |
+| `/health/scheduler` | is the poller keeping up?           | the last completed tick is older than `SCHEDULER_MAX_TICK_AGE_MINUTES`, or none ever completed |
 
 `/health` reports the scheduler in its body and sets `degraded` — a lagging
 poller is not a reason to restart a server that is serving, because the restart
@@ -69,7 +69,7 @@ Consequences, accepted:
   interval, the instance quietly reverts to `entry_frequency`. That is the
   designed degradation, not a failure mode.
 - Miniflux rewrites `next_check_at` between our writes. Read `checked_at` and
-  `next_check_at` *before* overwriting so we can decode state (below).
+  `next_check_at` _before_ overwriting so we can decode state (below).
 
 ## Budget
 
@@ -112,15 +112,15 @@ data-derived span, so that failure mode is structurally absent.
 
 Read from the **same** env vars Miniflux reads, so the two cannot drift:
 
-| derived | from |
-|---|---|
-| `maxPollsPerDay` = 1440 / minIntervalMinutes | `SCHEDULER_ENTRY_FREQUENCY_MIN_INTERVAL` |
-| (floor is a constant, see above) | — |
-| learning window | `SCHEDULER_LEARNING_WINDOW_DAYS` (default 90) |
-| EMA half-life | `SCHEDULER_RATE_HALF_LIFE_DAYS` (default 7) |
-| `/health/scheduler` staleness threshold | `SCHEDULER_MAX_TICK_AGE_MINUTES` (default 5) |
-| failing-feed probe ceiling | `SCHEDULER_FAILING_FEED_MAX_INTERVAL_MINUTES` (default 10080 = 7d) |
-| item-rate multiplier | `SCHEDULER_ENTRY_FREQUENCY_FACTOR` |
+| derived                                      | from                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------ |
+| `maxPollsPerDay` = 1440 / minIntervalMinutes | `SCHEDULER_ENTRY_FREQUENCY_MIN_INTERVAL`                           |
+| (floor is a constant, see above)             | —                                                                  |
+| learning window                              | `SCHEDULER_LEARNING_WINDOW_DAYS` (default 90)                      |
+| EMA half-life                                | `SCHEDULER_RATE_HALF_LIFE_DAYS` (default 7)                        |
+| `/health/scheduler` staleness threshold      | `SCHEDULER_MAX_TICK_AGE_MINUTES` (default 5)                       |
+| failing-feed probe ceiling                   | `SCHEDULER_FAILING_FEED_MAX_INTERVAL_MINUTES` (default 10080 = 7d) |
+| item-rate multiplier                         | `SCHEDULER_ENTRY_FREQUENCY_FACTOR`                                 |
 
 Declared once in `compose.yml` and interpolated into both services. Overridable
 via `MINIFLUX_MIN_INTERVAL_MINUTES`, `MINIFLUX_MAX_INTERVAL_MINUTES`,
@@ -137,20 +137,20 @@ of this document claimed the opposite — it had read only the pre-fetch call at
 - `handler.go:230` — `ScheduleNextCheck(weeklyEntryCount, time.Duration(0))`
   before fetching, which is just the entry-frequency default.
 - `handler.go:309-312` — on success, `refreshDelay = max(feedTTL,
-  Cache-Control max-age, Expires)` and `ScheduleNextCheck(weeklyEntryCount,
-  refreshDelay)`.
+Cache-Control max-age, Expires)` and `ScheduleNextCheck(weeklyEntryCount,
+refreshDelay)`.
 - `handler.go:255-256` — when rate-limited (HTTP 429), `retryDelay =
-  ParseRetryDelay()` (the `Retry-After` header) and `ScheduleNextCheck(
-  weeklyEntryCount, retryDelay)`.
+ParseRetryDelay()` (the `Retry-After` header) and `ScheduleNextCheck(
+weeklyEntryCount, retryDelay)`.
 - `model/feed.go` `ScheduleNextCheck` does `interval = max(interval,
-  refreshDelay)` then `NextCheckAt = now + interval`, and `UpdateFeed` /
+refreshDelay)` then `NextCheckAt = now + interval`, and `UpdateFeed` /
   `UpdateFeedError` persist it.
 
 **Consequence: we must not clobber those values.** Writing our own
 `next_check_at` over a `Retry-After` tells a rate-limited server we will not
 back off — the opposite of the politeness requirement. The probe-backoff branch
 is especially dangerous here, because a 429 increments `parsing_error_count`
-via the parse-error path and so *activates* the branch that overwrites it.
+via the parse-error path and so _activates_ the branch that overwrites it.
 
 We recover the hint by decoding what Miniflux wrote:
 
@@ -175,7 +175,7 @@ net-harmful. The one measurable case (hnrss.org, which returns **502** in waves
 while still delivering 56 items/day) went from full bells to 3 polls/day and
 paid a 277-minute median for it.
 
-A 502 is the server *failing*, not the server asking us to slow down. Backing
+A 502 is the server _failing_, not the server asking us to slow down. Backing
 off buys no politeness there — only latency, plus a delay in noticing the
 recovery. Error backoff therefore applies in exactly one place: **feeds with no
 learned model**, where there is no schedule to protect:
@@ -286,15 +286,15 @@ Existing rows are import-gated and must be excluded. This is the scoreboard.
 Captured 2026-10-04 from `created_at − published_at`, entries created in the
 trailing 30 days, excluding `published_at <= 2000-01-01` and clock-skewed rows:
 
-| n | mean | p50 | p90 |
-|---|---|---|---|
+| n     | mean      | p50         | p90           |
+| ----- | --------- | ----------- | ------------- |
 | 9,856 | 7,872 min | **109 min** | **1,292 min** |
 
 The mean is meaningless — a few backfilled entries drag it to days. **p50 109
 min / p90 1,292 min** are the numbers to beat.
 
-Methodological catch: this is measured over feeds that are *currently
-producing entries*, which excludes the 73 feeds stuck at the error limit.
+Methodological catch: this is measured over feeds that are _currently
+producing entries_, which excludes the 73 feeds stuck at the error limit.
 Reviving them will pull the numbers up, so compare before/after on a **fixed
 feed set**, not on the whole instance.
 

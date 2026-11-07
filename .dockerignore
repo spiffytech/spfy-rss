@@ -1,12 +1,26 @@
+# Build context is the repo root. Nothing here is needed by `bun run build`.
 .git
-**/Dockerfile
-**/.env*
-**/node_modules
-**/*.sqlite
-**/*.sqlite-shm
-**/*.sqlite-wal
+Dockerfile
+.env
+.env.*
+node_modules
 
-# Scratch/debris: never ship tooling logs or one-off import dumps in the image.
+# Runtime state and one-off imports: never ship these.
+data
+import-dump
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Not part of the image.
+dist
+test
+docs
+playground
+LICENSES
+.vscode
+
+# Debris
 .pi-submarine-*.log
-**/*.tsbuildinfo
 bazqux-*.xml
+*.tsbuildinfo

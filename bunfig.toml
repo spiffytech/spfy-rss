@@ -1,0 +1,6 @@
+[fmt]
+# Matches .editorconfig (2 spaces, LF, 100 columns) plus the style already in
+# the source: no semicolons, single quotes. `bun fmt` reads this file.
+printWidth = 100
+semi = false
+singleQuote = true

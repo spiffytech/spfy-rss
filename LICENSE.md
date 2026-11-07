@@ -3,7 +3,7 @@
 **© 2026 <https://codeberg.org/Mutualism/Mutualist-License>**
 
 **Short ID: MutuaL-1.2** or **MutuaL-1.2-only**  
-*Please note that not including “only” automatically allows license upgrades.*  
+_Please note that not including “only” automatically allows license upgrades._  
 “Mutualist License” and “MutuaL” should be seen as the same name everywhere one of them is used after this.
 
 This software is licensed under **MutuaL-1.2** (later versions permitted).
@@ -114,9 +114,9 @@ Every copyright holder and contributor, and everyone who gives you this software
 
 If they later get new patents, those patents are also covered if they would be broken by using this software as this license allows.
 
-If you start what we will call a *patent attack*, you immediately and permanently lose **all** rights under this license for this software.
+If you start what we will call a _patent attack_, you immediately and permanently lose **all** rights under this license for this software.
 
-A *patent attack* means starting a patent lawsuit or making a legal demand (such as a cease-and-desist letter or a request for royalty payment).
+A _patent attack_ means starting a patent lawsuit or making a legal demand (such as a cease-and-desist letter or a request for royalty payment).
 
 For an action to count as a patent attack, ALL of the following must be true:
 
@@ -126,7 +126,7 @@ For an action to count as a patent attack, ALL of the following must be true:
 
 ### What is not a patent attack
 
-A patent attack does *not* include legal actions against people who don’t have rights under this license. For example:
+A patent attack does _not_ include legal actions against people who don’t have rights under this license. For example:
 
 - Someone who never accepted this license, or
 - Someone who lost their rights under Redemption and did not fix the problem in time, or
@@ -136,7 +136,7 @@ None of these count as patent attacks.
 
 ### Defense exception
 
-This rule does not apply if you are only defending yourself. You are only defending yourself if *all* of the following are true:
+This rule does not apply if you are only defending yourself. You are only defending yourself if _all_ of the following are true:
 
 - Someone else sued you first over patents about this software (or software based on it).
 - You were following this license’s rules when they sued you.
@@ -159,9 +159,9 @@ This patent rule does not affect any other rights you might have under other agr
 
 Patent law requires precise language. Here is what the rules above mean in simple terms:
 
-A *patent attack* is when you use patents you control to stop someone from **using** this software as this license allows. If you do this, you lose all your rights to the software immediately and forever. There is no Redemption period.
+A _patent attack_ is when you use patents you control to stop someone from **using** this software as this license allows. If you do this, you lose all your rights to the software immediately and forever. There is no Redemption period.
 
-The **defense exception** protects you if someone else attacks *you* first. You can fight back in that same lawsuit without losing your license. However, you cannot start a separate patent action and claim it is “defense.” Your response must stay in the dispute they started.
+The **defense exception** protects you if someone else attacks _you_ first. You can fight back in that same lawsuit without losing your license. However, you cannot start a separate patent action and claim it is “defense.” Your response must stay in the dispute they started.
 
 You can sue people who never accepted this license, who already lost their rights under Redemption, or who already lost rights under this Innovation section. None of those count as patent attacks under this license.
 
@@ -171,18 +171,18 @@ This section explains these terms for your understanding, but are not themselves
 
 You are allowed to link or combine this software with other software licensed under different terms if that other software’s license gives everyone the rights to **use** it. The other software’s source code must be shared to others to fit this description.
 
-If the other software’s license fits that description, the Mutualism rule changes. MutuaL still applies to *this* software; however, it does not force you to share the *other* software’s source code. You must still follow the source sharing and network rules from Mutualism for the MutuaL-licensed parts, but you do not have to license the combined work as a whole under this license.
+If the other software’s license fits that description, the Mutualism rule changes. MutuaL still applies to _this_ software; however, it does not force you to share the _other_ software’s source code. You must still follow the source sharing and network rules from Mutualism for the MutuaL-licensed parts, but you do not have to license the combined work as a whole under this license.
 
 If the other software does not meet that condition (like if it’s closed source), this Cooperation exception does not apply. In that case, the full Mutualism rule applies to the entire combined work.
 
-This exception only applies if the *source code* remains separable; that is, the MutuaL-licensed source files remain separate from other source files and are not mixed in a way that prevents easy separation. What happens when source code is compiled into binaries does not change whether the source is separable. Code becomes inseparable when:
+This exception only applies if the _source code_ remains separable; that is, the MutuaL-licensed source files remain separate from other source files and are not mixed in a way that prevents easy separation. What happens when source code is compiled into binaries does not change whether the source is separable. Code becomes inseparable when:
 
 - It is copy-pasted across file boundaries, OR
 - Source files are merged so the MutuaL-licensed portions cannot be spotted and separated by reasonable effort.
 
 Separable means the MutuaL-licensed source code stays in its own identifiable files, even if those files are later compiled into a combined binary. If the source code becomes inseparable, the full Mutualism rule applies to everything.
 
-Static and dynamic linking are both allowed under this exception as long as the *source* files remain separate and identifiable.
+Static and dynamic linking are both allowed under this exception as long as the _source_ files remain separate and identifiable.
 
 Any license that fits the [Free Software Definition](https://www.gnu.org/philosophy/free-sw.html) or [Open Source Definition](https://opensource.org/osd) meets this condition. This is not the only way for a license to qualify.
 
@@ -190,7 +190,7 @@ This exception is offered by the Mutualist License, but please make sure the oth
 
 ## Redemption
 
-If any copyright holder of this software lets you know in writing that you have not followed any of the rules of this license *except* for Innovation, you can keep your license by fixing the problem. The notice must reasonably identify which rule or rules were broken so you know what to fix.
+If any copyright holder of this software lets you know in writing that you have not followed any of the rules of this license _except_ for Innovation, you can keep your license by fixing the problem. The notice must reasonably identify which rule or rules were broken so you know what to fix.
 
 To fix the problem, you must, within 30 days after you receive the notice:
 
@@ -225,19 +225,19 @@ Updating the license in the software does not change the license for copies you 
 
 ## Clarity
 
-By *this software,* we are including both its source code and any form built from that source code.
+By _this software,_ we are including both its source code and any form built from that source code.
 
-By *software based on this software,* we mean work that fits the legal definition of a derivative work under copyright law. Software is not *based on this software* if it only runs alongside it or talks to it through a *standard interface.* This license does not touch separate software.
+By _software based on this software,_ we mean work that fits the legal definition of a derivative work under copyright law. Software is not _based on this software_ if it only runs alongside it or talks to it through a _standard interface._ This license does not touch separate software.
 
-By *source code,* we mean the best form for making changes. This includes the code itself, plus the scripts and files needed to build, install, connect, and run it.
+By _source code,_ we mean the best form for making changes. This includes the code itself, plus the scripts and files needed to build, install, connect, and run it.
 
-By *share,* we mean giving copies of this software or software based on it to someone else, in any form, by any method, for free or for money.
+By _share,_ we mean giving copies of this software or software based on it to someone else, in any form, by any method, for free or for money.
 
-By *copyright and related rights,* we mean that besides copyright, we’re also including neighboring rights, database rights, and similar rights in any country.
+By _copyright and related rights,_ we mean that besides copyright, we’re also including neighboring rights, database rights, and similar rights in any country.
 
-By *standard interface,* we mean a public way for software to talk to other software. This includes things like APIs, protocols, or file formats. It must be documented in a way that allows independent implementation, and available for anyone in the general public to use.
+By _standard interface,_ we mean a public way for software to talk to other software. This includes things like APIs, protocols, or file formats. It must be documented in a way that allows independent implementation, and available for anyone in the general public to use.
 
-By *others,* we mean any person, company, or group that is not you, and not part of the same single legal entity as you.
+By _others,_ we mean any person, company, or group that is not you, and not part of the same single legal entity as you.
 
 - If you are acting as an individual, “others” means people you don’t live with and who aren’t part of your immediate family. Regardless of how your jurisdiction defines “immediate family”, your spouse, romantic partner(s), parents, siblings, and children always count as part of your immediate family as far as this license is concerned.
 - If you are acting for a legal entity, “others” are anyone outside that entity. Contractors do not count as “others” while they are:
@@ -250,13 +250,13 @@ Once a contractor’s work ends or these conditions no longer apply, they become
 - Public users, customers, clients, federated groups, and unrelated organizations always count as “others,” even if access to the service is limited, invite-only, or requires registration.
 - Cloud providers, CDNs, and similar outside services do not count as “others” or a group that “shares” the software if they just run or deliver what you tell them to.
 
-We need to use *legal entity* here, but it means a company, non-profit, or organization that the law treats as one single person.
+We need to use _legal entity_ here, but it means a company, non-profit, or organization that the law treats as one single person.
 
-By *core functionality,* we mean the essential features that make a service valuable to its users. Software provides core functionality when the service could not operate in its current form without it, and it provides substantial value that users benefit from.
+By _core functionality,_ we mean the essential features that make a service valuable to its users. Software provides core functionality when the service could not operate in its current form without it, and it provides substantial value that users benefit from.
 
-A version of the software is *unchanged* if you have not modified any part of its code or build configuration in a way that creates a derivative work under copyright or related rights. Changing only how the software is configured, such as setting environment variables, editing configuration files, or adjusting settings through the software’s own interface, does not count as modifying its code or build configuration. A copy remains unchanged even if you have configured it for your environment or use case.
+A version of the software is _unchanged_ if you have not modified any part of its code or build configuration in a way that creates a derivative work under copyright or related rights. Changing only how the software is configured, such as setting environment variables, editing configuration files, or adjusting settings through the software’s own interface, does not count as modifying its code or build configuration. A copy remains unchanged even if you have configured it for your environment or use case.
 
-By *in writing,* we mean a physical document or digital message. It must clearly show who sent it and what they mean.
+By _in writing,_ we mean a physical document or digital message. It must clearly show who sent it and what they mean.
 
 A version of the Mutualist License is only considered real and applicable to Foresight if it appears, or has ever appeared, at [the license’s home](https://codeberg.org/Mutualism/Mutualist-License) or a future home that the original author(s) designate.
 

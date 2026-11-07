@@ -32,48 +32,59 @@ Tailwind 4 + SQLite (Drizzle)**.
 
 ```sh
 bun install
+cp .env.example .env   # then set SESSION_SECRET
 ```
 
-Environment:
+Everything runs from the repository root: one package, one lockfile.
 
-| Variable | Meaning |
-|---|---|
-| `SESSION_SECRET` | HMAC key for session cookies. Required in production. |
-| `READER_DB_PATH` | SQLite file (default `./data/reader.sqlite`). |
-| `PORT` | HTTP port (default `5173`; the container sets `3000`). |
-| `ALLOW_SIGNUP` | Self-service registration. On by default; set `0` to close it. |
-| `MIGRATIONS_DIR` | Drizzle migrations folder (defaults to `./drizzle`). |
-| `READER_PUBLIC_URL` | Public origin WebSub hubs POST back to. Empty = no WebSub. |
-| `SCHEDULER_ENABLED` | `0` pauses the poll loop (same as the `.scheduler-off` flag). |
-| `SCHEDULER_ENTRY_FREQUENCY_MIN_INTERVAL` | Fastest per-feed poll, minutes (5). |
-| `SCHEDULER_ENTRY_FREQUENCY_MAX_INTERVAL` | Slowest per-feed poll / staleness ceiling (1440). |
-| `SCHEDULER_ENTRY_FREQUENCY_FACTOR` | Multiplies expected items/day (1). |
-| `SCHEDULER_LEARNING_WINDOW_DAYS` | Publish-rate learning window (90). |
-| `SCHEDULER_RATE_HALF_LIFE_DAYS` | Item-rate EMA half-life (7). |
-| `SCHEDULER_FAILING_FEED_MAX_INTERVAL_MINUTES` | Failure-probe backoff ceiling (10080). |
-| `SCHEDULER_MAX_TICK_AGE_MINUTES` | `/health/scheduler` 503 threshold (5). |
-| `POLLING_PARSING_ERROR_LIMIT` | Skip feeds at/above this error streak (0 = never). |
-| `MINIFLUX_SCHEDULER_NTFY_URL` | ntfy topic for scheduler alerts (empty = off). |
+Environment (all documented, with defaults, in `.env.example`):
+
+| Variable                                      | Meaning                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `SESSION_SECRET`                              | HMAC key for session cookies. Required in production.                                |
+| `READER_DB_PATH`                              | SQLite file (default `./data/reader.sqlite`).                                        |
+| `PORT`                                        | HTTP port (default `5173`; the container sets `3000`).                               |
+| `ALLOW_SIGNUP`                                | Self-service registration. On by default; set `0` to close it.                       |
+| `MIGRATIONS_DIR`                              | Drizzle migrations folder (defaults to `./drizzle`).                                 |
+| `READER_PUBLIC_URL`                           | Public origin WebSub hubs POST back to. Empty = no WebSub.                           |
+| `SCHEDULER_ENABLED`                           | `0` pauses the poll loop (same as the `.scheduler-off` flag).                        |
+| `SCHEDULER_ENTRY_FREQUENCY_MIN_INTERVAL`      | Fastest per-feed poll, minutes (5).                                                  |
+| `SCHEDULER_ENTRY_FREQUENCY_MAX_INTERVAL`      | Slowest per-feed poll / staleness ceiling (1440).                                    |
+| `SCHEDULER_ENTRY_FREQUENCY_FACTOR`            | Multiplies expected items/day (1).                                                   |
+| `SCHEDULER_LEARNING_WINDOW_DAYS`              | Publish-rate learning window (90).                                                   |
+| `SCHEDULER_RATE_HALF_LIFE_DAYS`               | Item-rate EMA half-life (7).                                                         |
+| `SCHEDULER_FAILING_FEED_MAX_INTERVAL_MINUTES` | Failure-probe backoff ceiling (10080).                                               |
+| `SCHEDULER_MAX_TICK_AGE_MINUTES`              | `/health/scheduler` 503 threshold (5).                                               |
+| `POLLING_PARSING_ERROR_LIMIT`                 | Skip feeds at/above this error streak (0 = never).                                   |
+| `MINIFLUX_SCHEDULER_NTFY_URL`                 | Legacy alias of `SCHEDULER_NTFY_URL` (ntfy topic for scheduler alerts; empty = off). |
 
 ## Run
 
 ```sh
 bun run dev        # Vite + API + scheduler + Tailwind watch
-bun run build      # typecheck + CSS + client bundle → dist/
+bun run build      # CSS + client bundle → dist/
 bun run start      # production: bun server.ts
 ```
 
-| Script | What it does |
-|---|---|
-| `bun run dev` | Web, worker, CSS in parallel |
-| `bun run build` | `build:css` + Vite build |
-| `bun run start` | Serve `dist/` and the API |
-| `bun run test` | `bun test` (server, shared, parser, scheduler) |
-| `bun run test:webview` | Built app driven in a webview |
-| `bun run typecheck` | `tsc --noEmit` |
-| `bun run db:generate` | Generate a Drizzle migration from `schema.ts` |
+| Script                 | What it does                                   |
+| ---------------------- | ---------------------------------------------- |
+| `bun run dev`          | Web, worker, CSS in parallel                   |
+| `bun run build`        | `build:css` + Vite build                       |
+| `bun run start`        | Serve `dist/` and the API                      |
+| `bun run check`        | `typecheck` + `test`                           |
+| `bun run test`         | `bun test` (server, shared, parser, scheduler) |
+| `bun run test:webview` | Built app driven in a webview                  |
+| `bun run typecheck`    | `tsc --noEmit`                                 |
+| `bun run db:generate`  | Generate a Drizzle migration from `schema.ts`  |
 
-The database migrates itself on startup.
+The database migrates itself on startup. Runtime state (`data/reader.sqlite`
+unless `READER_DB_PATH` says otherwise, plus the scheduler flags beside it) is
+created on first run and git-ignored.
+
+## Deploy
+
+`Dockerfile` builds from the repository root; compose supplies `SESSION_SECRET`,
+`READER_PUBLIC_URL` and the volume that backs `/data`.
 
 ## Authentication
 

@@ -1,9 +1,0 @@
-# never ship these in an image (COPY ignores .gitignore!)
-node_modules
-dist
-data
-import-dump
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
-test

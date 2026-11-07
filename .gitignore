@@ -1,49 +1,33 @@
-# dependencies (bun install)
+# dependencies
 node_modules
 
-# Vite build output
+# build output
 dist
-dist-ssr
 
-# datastar-era generated CSS (superseded by Vite hashing)
+# Tailwind CLI output (Vite hashes its own CSS)
 public/style.css
-public/style-*.css
-public/.asset-manifest.json
 
-# dotenv environment variable files
+# env
 .env
-*.local
+.env.local
 
-# sqlite
+# runtime state: the database and the scheduler flags written beside it
+data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 
-# runtime scheduler state (written beside the database, never committed)
-.scheduler-heartbeat
-.scheduler-heartbeat.tmp
-.scheduler-off
-
-# tooling
-coverage
-*.tsbuildinfo
-.eslintcache
-test-results/
-playwright-report/
-__screenshots__/
-
-.vscode
+# Miniflux import dump — contains the full subscription list; never commit
+import-dump/
 
 # scratch/ops scripts (not app source)
 playground/
 
-# Tooling debris (job_watch logs, etc.)
+# tooling
+coverage
+*.tsbuildinfo
+.vscode
+
+# tooling debris
 .pi-submarine-watch-*.log
-
-# reader app (app/) build output
-app/dist/
-app/public/style.css
-
-# Miniflux import dump — contains the full subscription list; never commit
-import-dump/
-app/import-dump/
+bazqux-*.xml

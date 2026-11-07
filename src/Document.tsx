@@ -19,6 +19,7 @@ export default function Document(props: { children?: JSX.Element }) {
         <meta name="description" content="A focused, self-hosted RSS reader." />
         <meta name="theme-color" content="#0e7490" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content="spfy rss" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <link rel="manifest" href="/manifest.json" />

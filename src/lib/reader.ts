@@ -41,7 +41,7 @@ import {
 import type { EntrySummary, FeedPanelResult, ViewCursor } from '../shared/types'
 import { compareTitlesCI, computeUnreadCount } from '../shared/util'
 import { navTarget, scrollRoot, scrollToEntry } from './nav'
-import { checkVersion } from './version'
+import { checkVersion, updateAvailable } from './version'
 
 /** One screenful; scrolling asks for another. */
 const PAGE_SIZE = 100
@@ -173,74 +173,96 @@ export const createReader = (filter: () => EntriesFilter) => {
    */
   const [page, setPage] = createOptimisticStore<ListState>(
     async (draft) => {
-      // Read tracked state BEFORE the first await: reads after one see the
-      // snapshot taken when the compute started.
-      const key = viewKey()
-      const wanted = session.wanted
-      const gen = session.listGen
-      // Plain copies, taken before the first await: a store read after one sees
-      // the snapshot from when the compute started.
-      const serverReadStatus = { ...session.serverReadStatus }
-      const serverStarred = { ...session.serverStarred }
-      // No view (the home page) means no window to read: asking would be a
-      // request for entries with no filter, which the server refuses.
-      if (!hasView(filter())) {
-        draft.viewKey = key
-        draft.gen = gen
-        draft.entries = []
-        draft.nextCursor = null
-        return
-      }
-      // A different view — or a request to re-read from the top — starts over.
-      if (draft.viewKey !== key || draft.gen !== gen) {
-        draft.viewKey = key
-        draft.gen = gen
-        draft.entries = []
-        draft.nextCursor = null
-      }
-      // What the server answered for rows this session wrote. The derive never
-      // re-reads them, so this is how it re-produces the write. Applied before
-      // the first await: from there on the derive must not read the draft.
-      for (const row of draft.entries) {
-        const status = serverReadStatus[row.id]
-        if (status) row.status = status
-        if (row.id in serverStarred) row.starred = serverStarred[row.id]!
-      }
-      // The window's rows, and how many: read once, before the first await. The
-      // draft's own keys are this derive's output, not dependencies, and a read
-      // of them after an await is untracked state (UNTRACKED_READ_AFTER_AWAIT).
-      const rows = draft.entries
-      let count = rows.length
-      let cursor = wire(draft.nextCursor)
-      if (count === 0) {
-        const first = await api.viewEntries(wire(filter()), null)
-        draft.entries = snapshot(first.entries)
-        draft.nextCursor = first.nextCursor
-      } else {
-        while (count < wanted && cursor) {
-          const ahead = prefetched && prefetched.from === cursorKey(cursor) ? prefetched : null
-          if (ahead) {
-            prefetched = null
-            rows.push(...snapshot(ahead.entries))
-            draft.nextCursor = ahead.nextCursor
-            cursor = wire(ahead.nextCursor)
-            count += ahead.entries.length
-            continue
-          }
-          const next = await api.viewEntries(wire(filter()), wire(cursor))
-          rows.push(...snapshot(next.entries))
-          draft.nextCursor = next.nextCursor
-          cursor = wire(next.nextCursor)
-          count += next.entries.length
+      try {
+        // Read tracked state BEFORE the first await: reads after one see the
+        // snapshot taken when the compute started.
+        const key = viewKey()
+        const wanted = session.wanted
+        const gen = session.listGen
+        // Plain copies, taken before the first await: a store read after one sees
+        // the snapshot from when the compute started.
+        const serverReadStatus = { ...session.serverReadStatus }
+        const serverStarred = { ...session.serverStarred }
+        // No view (the home page) means no window to read: asking would be a
+        // request for entries with no filter, which the server refuses.
+        if (!hasView(filter())) {
+          draft.viewKey = key
+          draft.gen = gen
+          draft.entries = []
+          draft.nextCursor = null
+          return
         }
+        // A different view — or a request to re-read from the top — starts over.
+        if (draft.viewKey !== key || draft.gen !== gen) {
+          draft.viewKey = key
+          draft.gen = gen
+          draft.entries = []
+          draft.nextCursor = null
+        }
+        // What the server answered for rows this session wrote. The derive never
+        // re-reads them, so this is how it re-produces the write. Applied before
+        // the first await: from there on the derive must not read the draft.
+        for (const row of draft.entries) {
+          const status = serverReadStatus[row.id]
+          if (status) row.status = status
+          if (row.id in serverStarred) row.starred = serverStarred[row.id]!
+        }
+        // The window's rows, and how many: read once, before the first await. The
+        // draft's own keys are this derive's output, not dependencies, and a read
+        // of them after an await is untracked state (UNTRACKED_READ_AFTER_AWAIT).
+        const rows = draft.entries
+        let count = rows.length
+        let cursor = wire(draft.nextCursor)
+        if (count === 0) {
+          const first = await api.viewEntries(wire(filter()), null)
+          draft.entries = snapshot(first.entries)
+          draft.nextCursor = first.nextCursor
+        } else {
+          while (count < wanted && cursor) {
+            const ahead = prefetched && prefetched.from === cursorKey(cursor) ? prefetched : null
+            if (ahead) {
+              prefetched = null
+              rows.push(...snapshot(ahead.entries))
+              draft.nextCursor = ahead.nextCursor
+              cursor = wire(ahead.nextCursor)
+              count += ahead.entries.length
+              continue
+            }
+            const next = await api.viewEntries(wire(filter()), wire(cursor))
+            rows.push(...snapshot(next.entries))
+            draft.nextCursor = next.nextCursor
+            cursor = wire(next.nextCursor)
+            count += next.entries.length
+          }
+        }
+      } catch (error) {
+        // The list's half of the stale-client case: keep the rows on screen.
+        if (await checkVersion()) return
+        throw error
       }
     },
     { entries: [], nextCursor: null, viewKey: '', gen: 0 },
   )
-  const [panel, setPanel] = createOptimisticStore<FeedPanelResult>(
-    () => api.viewPanel(currentFeedId()),
-    null,
-  )
+  /**
+   * The sidebar snapshot.
+   *
+   * A server function that no longer exists (a deploy under an open tab) answers
+   * 409, which the RPC client throws as "not part of the deployment". Unhandled,
+   * that escaped as an uncaught exception on every idle poll. Ask the version
+   * endpoint instead: keep the snapshot already on screen and let the shell show
+   * its reload notice. A read that fails for any other reason still throws.
+   */
+  let lastPanel: FeedPanelResult | null = null
+  const [panel, setPanel] = createOptimisticStore<FeedPanelResult>(async () => {
+    try {
+      const next = await api.viewPanel(currentFeedId())
+      lastPanel = next
+      return next
+    } catch (error) {
+      if (lastPanel !== null && (await checkVersion())) return lastPanel
+      throw error
+    }
+  }, null)
 
   const entries = (): EntrySummary[] => page.entries
 
@@ -841,7 +863,12 @@ export const createReader = (filter: () => EntriesFilter) => {
    */
   const startIdleRefresh = (): (() => void) => {
     if (pollTimer) return stopIdleRefresh
-    pollTimer = setInterval(() => refresh(panel), POLL_MS)
+    pollTimer = setInterval(() => {
+      // A stale tab cannot read: every poll would 409 again. The reload notice is
+      // already on screen, so stop asking until it is acted on.
+      if (updateAvailable()) return
+      refresh(panel)
+    }, POLL_MS)
     return stopIdleRefresh
   }
 

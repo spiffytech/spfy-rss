@@ -85,8 +85,17 @@ export function ingestFeedOutcome(opts: {
   }
 
   if (outcome.kind === 'not-modified') {
+    // A 304 is the origin confirming the resource is healthy: the validator we
+    // sent still matches, so the error streak ends here too. Clearing only
+    // `lastError` left `parsing_error_count > 0` with no message, which pinned
+    // unmodelled feeds to probe backoff for good.
     db.update(feeds)
-      .set({ checkedAt: outcome.fetchedAt, lastError: null, lastErrorAt: null })
+      .set({
+        checkedAt: outcome.fetchedAt,
+        parsingErrorCount: 0,
+        lastError: null,
+        lastErrorAt: null,
+      })
       .where(eq(feeds.id, feed.id))
       .run()
     return { kind: 'not-modified', freshnessMs: outcome.freshnessMs }

@@ -41,6 +41,8 @@ export function fetchScheduleFeeds(db: ReaderHandle['db']): FeedScheduleState[] 
       url: feeds.feedUrl,
       checkedAt: feeds.checkedAt,
       nextCheckAt: feeds.nextCheckAt,
+      /** Origin floor from Retry-After / cache freshness, persisted at fetch. */
+      fetchAfterAt: feeds.fetchAfterAt,
       parsingErrorCount: feeds.parsingErrorCount,
     })
     .from(feeds)

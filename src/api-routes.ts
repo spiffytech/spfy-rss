@@ -40,9 +40,12 @@ export const handleApiRoute = async (
 ): Promise<Response | null> => {
   const url = new URL(request.url)
   const path = url.pathname
+  // Probers often use HEAD to avoid a body. Treat it as GET for the two health
+  // endpoints; a body is harmless there and Bun drops it from the response.
+  const probe = request.method === 'GET' || request.method === 'HEAD'
 
-  if (path === '/health' && request.method === 'GET') return healthResponse()
-  if (path === '/health/scheduler' && request.method === 'GET') return schedulerHealthResponse()
+  if (path === '/health' && probe) return healthResponse()
+  if (path === '/health/scheduler' && probe) return schedulerHealthResponse()
   // Which build this server is. Unauthenticated on purpose: it is a nonce with
   // no information in it beyond "same as yours or not", and an open client has
   // to be able to ask before it can tell you it is stale.
@@ -53,6 +56,13 @@ export const handleApiRoute = async (
 
   const icon = path.match(/^\/api\/icons\/([^/]+)$/)
   if (icon && request.method === 'GET') return iconResponse(icon[1]!, context.user)
+
+  // An unmatched machine-facing path is a 404, never a page. Falling through
+  // sent `HEAD /health` (or a typo'd probe URL) to the auth gate, which answered
+  // 302 /login — and a prober that follows redirects read 200 text/html.
+  if (path === '/health' || path.startsWith('/health/') || path.startsWith('/api/')) {
+    return new Response('not found', { status: 404, headers: NO_STORE })
+  }
 
   return null
 }
@@ -174,6 +184,10 @@ const webSubResponse = async (request: Request, url: URL): Promise<Response> => 
     // The hub tells us which topic it thinks it is verifying. Refuse a mismatch
     // so one feed's token can never be used to verify another's.
     if (topic && topic !== feed.feedUrl) {
+      // The hub is verifying a topic we did not subscribe to. Any lease we
+      // claimed on the subscribe POST is now a lie: drop it so "covered" is
+      // never true while no push can arrive.
+      db.db.update(feeds).set({ websubLeaseUntil: null }).where(eq(feeds.id, feed.id)).run()
       console.warn('websub: verification refused, topic mismatch', feed.feedUrl, 'vs', topic)
       return new Response('topic mismatch', { status: 404, headers: NO_STORE })
     }
@@ -182,7 +196,14 @@ const webSubResponse = async (request: Request, url: URL): Promise<Response> => 
     // scheduler knows to keep polling rather than wait for a push that is not
     // coming.
     if (mode === 'unsubscribe') {
-      db.db.update(feeds).set({ websubLeaseUntil: null }).where(eq(feeds.id, feed.id)).run()
+      // Clear the hub as well as the lease. Keeping it made the hourly sweep see
+      // "hub set, lease null" and re-subscribe within the hour, undoing the
+      // teardown the hub just confirmed.
+      db.db
+        .update(feeds)
+        .set({ websubLeaseUntil: null, websubHub: null })
+        .where(eq(feeds.id, feed.id))
+        .run()
     }
     // The only place a hub's verification becomes observable: a granted lease
     // (websub_lease_until in the future) is proof this GET answered.

@@ -31,10 +31,10 @@ store; we only write `feeds.next_check_at`. Not intended for upstream.
 
 Two URLs, because they answer different questions:
 
-| URL                 | Question                            | 503 when                                                                                       |
-| ------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `/health`           | should this container be restarted? | the database does not answer                                                                   |
-| `/health/scheduler` | is the poller keeping up?           | the last completed tick is older than `SCHEDULER_MAX_TICK_AGE_MINUTES`, or none ever completed |
+| URL                 | Question                            | 503 when                                                                                                                                                  |
+| ------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/health`           | should this container be restarted? | the database does not answer                                                                                                                              |
+| `/health/scheduler` | is the poller keeping up?           | the loop says it is running and the last completed tick is older than `SCHEDULER_MAX_TICK_AGE_MINUTES` (or none completed), or no heartbeat exists at all |
 
 `/health` reports the scheduler in its body and sets `degraded` — a lagging
 poller is not a reason to restart a server that is serving, because the restart
@@ -47,6 +47,20 @@ module graphs in production (`server.ts` imports `src/`; routes come from the
 bundled `dist/server/server.js`) and different processes in dev. In-memory
 state would read as "never ticked" from `/health`, which is exactly the alert
 you would not notice was broken.
+
+Its `phase` is the loop's run-state, not an inference from timestamps:
+
+| phase      | Meaning                                 | Staleness applies? |
+| ---------- | --------------------------------------- | ------------------ |
+| `running`  | the loop is live                        | yes                |
+| `paused`   | `.scheduler-off` is present             | no — 200           |
+| `disabled` | `SCHEDULER_ENABLED=0`                   | no — 200           |
+| `unknown`  | no heartbeat file: the poller never ran | 503                |
+
+Without this, pausing had to manufacture a successful tick every minute to keep
+the file fresh (so a paused poller looked healthy), and a deliberately disabled
+scheduler inherited the previous run's file and read as broken. Only `running`
+is ever stale; `unknown` is a failure because there is no evidence at all.
 
 ## The control model
 

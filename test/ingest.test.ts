@@ -148,7 +148,7 @@ test('removed entries never resurrect', () => {
   expect(handle.db.select().from(entries).all()[0]!.status).toBe('removed')
 })
 
-test('errors bump parsing_error_count; success resets it; not-modified touches checked_at', () => {
+test('errors bump parsing_error_count; a 304 or a success resets it', () => {
   const { handle, feedId } = setup()
   ingestFeedOutcome({
     handle,
@@ -165,7 +165,8 @@ test('errors bump parsing_error_count; success resets it; not-modified touches c
   })
   feed = handle.db.select().from(feeds).all()[0]!
   expect(feed.checkedAt).toBe(epochMs(NOW + 1000))
-  expect(feed.parsingErrorCount).toBe(1) // untouched by 304
+  // A 304 proves the resource is healthy — the streak ends with it.
+  expect(feed.parsingErrorCount).toBe(0)
 
   ingestFeedOutcome({
     handle,

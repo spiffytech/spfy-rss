@@ -180,6 +180,18 @@ test('WebSub handshakes are never stored', async () => {
   expect(verify?.headers.get('cache-control')).toBe('no-store')
 })
 
-test('unknown API paths fall through to the app', async () => {
-  expect(await api('/api/nope')).toBeNull()
+test('machine-facing paths never become a page', async () => {
+  // Falling through to the auth gate answered `HEAD /health` (and any typo'd
+  // probe) with 302 /login; a prober that follows redirects read 200 text/html.
+  const unknown = await api('/api/nope')
+  expect(unknown?.status).toBe(404)
+  expect(unknown?.headers.get('cache-control')).toBe('no-store')
+
+  const typo = await api('/health/schedulr', false)
+  expect(typo?.status).toBe(404)
+
+  const head = await handleApiRoute(new Request('http://reader.test/health', { method: 'HEAD' }), {
+    user: null,
+  })
+  expect(head?.status).toBe(200)
 })

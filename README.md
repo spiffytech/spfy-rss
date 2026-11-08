@@ -117,9 +117,12 @@ echo -n 'correct horse' | bun run scripts/set-password.ts spiffy
 ## Operations
 
 - `GET /health` — liveness (process + database). Scheduler state rides in the
-  body and never changes the status.
-- `GET /health/scheduler` — 503 once the last completed tick is older than the
-  configured limit.
+  body and never changes the status. This is the only endpoint a container
+  healthcheck may act on.
+- `GET /health/scheduler` — 503 once a `running` loop's last completed tick is
+  older than the configured limit, or when no heartbeat exists at all. Paused
+  (`data/.scheduler-off`) and disabled (`SCHEDULER_ENABLED=0`) answer 200 with
+  the phase in the body. Alert on this; never restart on it.
 - `GET /opml` — OPML export.
 - `/api/websub/<token>` — hub callback.
 

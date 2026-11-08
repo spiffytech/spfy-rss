@@ -9,6 +9,17 @@
  */
 import { z } from 'zod'
 
+import type { EntryStatus } from '../../shared/ids'
+
+/**
+ * Miniflux's status vocabulary, in one place. `load` writes through it and
+ * `verify` reads back through it; two copies could validate the wrong mapping.
+ * An unknown status is treated as unread — visible, not silently dropped.
+ */
+export function normalizeStatus(status: string | null | undefined): EntryStatus {
+  return status === 'read' ? 'read' : status === 'removed' ? 'removed' : 'unread'
+}
+
 const ts = z.number().nullable().optional()
 const int = z.number().nullable().optional()
 

@@ -98,6 +98,10 @@ export const feeds = sqliteTable(
      *  Shown (with its timestamp and the error streak) on the feed's warning. */
     lastError: text('last_error'),
     lastErrorAt: integer('last_error_at').$type<EpochMs>(),
+    /** Last icon acquisition attempt (epoch-ms). Null = never tried. Recording
+     *  the attempt makes "no icon found" a fact that retries weekly instead of
+     *  an absence that costs two outbound requests on every poll. */
+    iconCheckedAt: integer('icon_checked_at').$type<EpochMs>(),
     createdAt: integer('created_at').$type<EpochMs>().notNull(),
   },
   (t) => [

@@ -723,6 +723,52 @@ it('header names a feed the sidebar hides (everything read, unread-only view)', 
   }
 }, 45_000)
 
+it('search stays inside the open view, says so, and can be widened', async () => {
+  // Searching from a feed is scoped to that feed by design. The scope has to be
+  // visible and escapable: the URL carries `feed` and `search` at once.
+  const view = new Bun.WebView({ width: 1100, height: 800 })
+  try {
+    await signIn(view)
+    await openFeedView(view)
+    const feedId = fixtureFeedId()
+
+    await view.click('#reader-search')
+    await view.type('Plain')
+
+    const scoped = (await view.evaluate(
+      until(
+        `const s = location.search; return s.includes('search=Plain') && s.includes('feed=') ? location.pathname + s : ''`,
+      ),
+    )) as string
+    expect(scoped).toContain(`feed=${feedId}`)
+    expect(scoped).toContain('search=Plain')
+
+    // The header states the scope instead of only "Search: Plain".
+    const label = (await view.evaluate(
+      until(
+        `const t = document.querySelector('[data-testid="feed-menu-trigger"]'); const v = t ? t.textContent.trim() : ''; return v.includes('Search in Blog: Plain') ? v : ''`,
+        5000,
+      ),
+    )) as string
+    expect(label.length).toBeGreaterThan(0)
+
+    // One click widens it: the term survives, the feed scope does not.
+    await view.click('[data-testid="feed-menu-trigger"]')
+    await view.evaluate(
+      until(`return document.querySelector('[data-testid="search-all-feeds"]') ? 'ready' : ''`),
+    )
+    await view.click('[data-testid="search-all-feeds"]')
+    const widened = (await view.evaluate(
+      until(
+        `const s = location.search; return s.includes('search=Plain') && !s.includes('feed=') ? s : ''`,
+      ),
+    )) as string
+    expect(widened).not.toContain('feed=')
+  } finally {
+    await view.close()
+  }
+}, 45_000)
+
 it('home lists favorited feeds and nothing else', async () => {
   const view = new Bun.WebView({ width: 1100, height: 800 })
   try {

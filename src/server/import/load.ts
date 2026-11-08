@@ -30,7 +30,6 @@ import {
   newFeedId,
   newIconId,
   newUserId,
-  type EntryStatus,
   type FeedId,
   type UserId,
 } from '../../shared/ids'
@@ -45,6 +44,7 @@ import {
   mfIcon,
   mfTombstone,
   mfUser,
+  normalizeStatus,
   type MfEntry,
   type MfFeed,
 } from './mf-rows'
@@ -70,10 +70,6 @@ function readRows<T>(dumpDir: string, table: string, schema: RowSchema<T>): T[] 
     .split('\n')
     .filter((line) => line.length > 0)
     .map((line) => schema.parse(JSON.parse(line)))
-}
-
-function normalizeStatus(status: string | null | undefined): EntryStatus {
-  return status === 'read' ? 'read' : status === 'removed' ? 'removed' : 'unread'
 }
 
 export function loadFromDump(opts: {
@@ -189,7 +185,8 @@ export function loadFromDump(opts: {
         continue
       }
       const createdAt = epochMs(row.created_at ?? row.published_at)
-      db.insert(entries)
+      const inserted = db
+        .insert(entries)
         .values({
           id: newEntryId(createdAt),
           userId,
@@ -208,8 +205,11 @@ export function loadFromDump(opts: {
           tags: row.tags ?? [],
         })
         .onConflictDoNothing()
-        .run()
-      report.entries++
+        .returning({ id: entries.id })
+        .all()
+      // A re-run matches every natural key and inserts nothing. Report what
+      // landed, not what was attempted, or a no-op looks like a full import.
+      if (inserted.length > 0) report.entries++
     }
 
     // --- entry_tombstones → stub entries (the anti-resurrection set) ---
@@ -221,7 +221,8 @@ export function loadFromDump(opts: {
         continue
       }
       const deletedAt = epochMs(row.deleted_at ?? now)
-      db.insert(entries)
+      const inserted = db
+        .insert(entries)
         .values({
           id: newEntryId(deletedAt),
           userId,
@@ -240,8 +241,9 @@ export function loadFromDump(opts: {
           tags: [],
         })
         .onConflictDoNothing()
-        .run()
-      report.stubs++
+        .returning({ id: entries.id })
+        .all()
+      if (inserted.length > 0) report.stubs++
     }
 
     // --- icons (dedupe on bytes; MF's own hash column stays behind) ---
@@ -266,8 +268,13 @@ export function loadFromDump(opts: {
       const feedId = feedMap.get(row.feed_id)
       const iconId = iconMap.get(row.icon_id)
       if (!feedId || !iconId) continue
-      db.insert(feedIcons).values({ feedId, iconId }).onConflictDoNothing().run()
-      report.feedIcons++
+      const linked = db
+        .insert(feedIcons)
+        .values({ feedId, iconId })
+        .onConflictDoNothing()
+        .returning({ feedId: feedIcons.feedId })
+        .all()
+      if (linked.length > 0) report.feedIcons++
     }
 
     // --- prefs side-DB: scope `user` | `feed:<int>` remapped to new UUIDs ---
@@ -299,11 +306,13 @@ export function loadFromDump(opts: {
             }
             scope = `feed:${feedId}`
           }
-          db.insert(userPrefs)
+          const stored = db
+            .insert(userPrefs)
             .values({ userId, scope, prefs: row.prefs })
             .onConflictDoNothing()
-            .run()
-          report.prefs++
+            .returning({ scope: userPrefs.scope })
+            .all()
+          if (stored.length > 0) report.prefs++
         }
       } finally {
         prefsDb.close()

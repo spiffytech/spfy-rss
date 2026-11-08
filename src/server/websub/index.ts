@@ -104,10 +104,14 @@ export async function ensureSubscribed(
   const row = db.select().from(feeds).where(eq(feeds.id, feedId)).get()
   if (!row) return
 
-  const { hub, self } = discoverHub(xml)
+  const { hub } = discoverHub(xml)
   if (!hub) return // no hub advertised: polling is the mechanism, nothing to do
 
-  const topic = self ?? feedUrl
+  // One topic expression, used here, in `renewDue`, and by the callback's
+  // verification check. Honouring `rel="self"` here while the callback demanded
+  // `feedUrl` meant a feed whose self link differs never verified — and, because
+  // `lease == null` reads as "retry", subscribed again on every poll forever.
+  const topic = feedUrl
   const covered =
     row.websubHub === hub && row.websubLeaseUntil != null && row.websubLeaseUntil > now + 60_000
   if (covered) return
@@ -154,11 +158,19 @@ export async function renewDue(
   let renewed = 0
   let failed = 0
   for (const f of due) {
+    // A row can hold a hub without a token (a half-finished discovery). Mint one
+    // and persist it before the hub can call back: a token that only exists in
+    // this request matches no row, so verification would 404.
+    let token = f.websubToken
+    if (!token) {
+      token = newCallbackToken()
+      db.update(feeds).set({ websubToken: token }).where(eq(feeds.id, f.id)).run()
+    }
     const ok = await subscribe({
       hub: f.websubHub as string,
       topic: f.feedUrl,
-      callback: callbackUrl(f.websubToken ?? newCallbackToken()),
-      secret: f.websubToken ?? '',
+      callback: callbackUrl(token),
+      secret: token,
     })
     if (ok) {
       renewed++

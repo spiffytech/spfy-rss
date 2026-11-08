@@ -8,15 +8,19 @@ import { eq } from 'drizzle-orm'
 import type { FeedId, IconId } from '../../shared/ids'
 import { epochMs, newIconId } from '../../shared/ids'
 import type { ReaderHandle } from '../db'
-import { feedIcons, icons } from '../db/schema'
+import { feedIcons, feeds, icons } from '../db/schema'
 
 const MAX_ICON_BYTES = 512 * 1024
+/** How long a failed attempt is trusted before trying again. */
+const RETRY_MS = 7 * 86_400_000
 
 export async function ensureFeedIcon(opts: {
   handle: ReaderHandle
   feedId: FeedId
   candidates: string[]
   now?: number
+  /** Skip the retry window — a manual save is an explicit ask to try now. */
+  force?: boolean
 }): Promise<boolean> {
   const { db } = opts.handle
   const existing = db
@@ -25,6 +29,21 @@ export async function ensureFeedIcon(opts: {
     .where(eq(feedIcons.feedId, opts.feedId))
     .get()
   if (existing) return true
+
+  const feed = db
+    .select({ iconCheckedAt: feeds.iconCheckedAt })
+    .from(feeds)
+    .where(eq(feeds.id, opts.feedId))
+    .get()
+  if (!feed) return false
+  const now = opts.now ?? Date.now()
+  if (!opts.force && feed.iconCheckedAt != null && now - feed.iconCheckedAt < RETRY_MS) return false
+  // Stamp the attempt before the network can fail: one try per window whatever
+  // happens next, so an iconless feed stops costing requests on every poll.
+  db.update(feeds)
+    .set({ iconCheckedAt: epochMs(now) })
+    .where(eq(feeds.id, opts.feedId))
+    .run()
 
   for (const url of opts.candidates) {
     if (!url) continue

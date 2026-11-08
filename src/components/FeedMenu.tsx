@@ -64,6 +64,7 @@ export const FeedMenu = () => {
   // Starred and category views are aggregates.
   const isFeedView = () => feedId() != null && feedId() !== ''
   const searchActive = () => Boolean(r.filter().search)
+  const searchScope = () => r.searchScope()
   const autoReadOff = () =>
     (r.panel.userPrefs.disabledAutoReadFeeds ?? []).includes(feedId() as FeedId)
 
@@ -164,6 +165,14 @@ export const FeedMenu = () => {
   const onHideEmptyFeeds = () => runAndClose(() => toggleHideEmptyFeeds())
   const onHideReadItems = () => runAndClose(() => setHideReadItems(!r.hidesReadItems()))
   const onClearSearch = () => runAndClose(() => search.clearSearch())
+  /** Keep the term, drop the view: the same results, no longer confined. */
+  const onSearchAll = () =>
+    runAndClose(() =>
+      setSearchParams(
+        { feed: undefined, category: undefined, starred: undefined },
+        { replace: true },
+      ),
+    )
 
   const onEditFeed = (): void => {
     const id = feedId()
@@ -241,7 +250,7 @@ export const FeedMenu = () => {
           <div class="md:hidden p-2 flex flex-col gap-1 border-b border-line">
             <input
               type="search"
-              placeholder="Search…"
+              placeholder={searchScope() ? `Search in ${searchScope()}…` : 'Search all feeds…'}
               class="w-full min-h-11 px-3 py-2 border border-line rounded-lg"
               value={search.text()}
               onInput={(event) => search.onSearchInput(event.currentTarget.value)}
@@ -252,6 +261,22 @@ export const FeedMenu = () => {
               </button>
             </Show>
           </div>
+
+          {/* The scope is a deliberate state, so there is a way out of it that
+              keeps the term. Shown at both widths; the desktop box has no room
+              for a second control beside it. */}
+          <Show when={searchActive() && searchScope()}>
+            <div class="p-2 border-b border-line">
+              <button
+                type="button"
+                class="menu-row"
+                data-testid="search-all-feeds"
+                onClick={() => void onSearchAll()}
+              >
+                Search all feeds
+              </button>
+            </div>
+          </Show>
 
           {/* The one primary action on this surface. */}
           <div class="p-2 border-b border-line">

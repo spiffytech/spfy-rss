@@ -21,6 +21,8 @@ export const TopToolbar = (props: { onToggleSidebar: () => void; reading: boolea
   const search = createSearch(r, (term) =>
     setSearchParams({ search: term, cursor: undefined }, { replace: true }),
   )
+  // Search is scoped to the view you are already in; say so in the box.
+  const scope = () => r.searchScope()
 
   const onMarkAllRead = (): void => {
     // Explicit-ID semantics: marks exactly the IDs this view fetched (the loaded
@@ -86,7 +88,7 @@ export const TopToolbar = (props: { onToggleSidebar: () => void; reading: boolea
       <input
         id="reader-search"
         type="search"
-        placeholder="Search…"
+        placeholder={scope() ? `Search in ${scope()}…` : 'Search all feeds…'}
         class="hidden md:block flex-1 max-w-sm min-w-[100px] min-h-11 px-3 py-2 border border-line rounded-lg"
         value={search.text()}
         onInput={(event) => search.onSearchInput(event.currentTarget.value)}

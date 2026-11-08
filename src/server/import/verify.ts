@@ -10,10 +10,17 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { type EntryStatus } from '../../shared/ids'
 import type { ReaderHandle } from '../db'
 import { categories, entries, feeds, icons, users } from '../db/schema'
-import { mfCategory, mfEntry, mfFeed, mfIcon, mfTombstone, mfUser } from './mf-rows'
+import {
+  mfCategory,
+  mfEntry,
+  mfFeed,
+  mfIcon,
+  mfTombstone,
+  mfUser,
+  normalizeStatus,
+} from './mf-rows'
 
 export type VerifyReport = {
   pass: boolean
@@ -33,10 +40,6 @@ function readRows<T>(dumpDir: string, table: string, schema: { parse(value: unkn
     .split('\n')
     .filter((line) => line.length > 0)
     .map((line) => schema.parse(JSON.parse(line)))
-}
-
-function normalizeStatus(status: string | null | undefined): EntryStatus {
-  return status === 'read' ? 'read' : status === 'removed' ? 'removed' : 'unread'
 }
 
 export function verifyImport(opts: { handle: ReaderHandle; dumpDir: string }): VerifyReport {

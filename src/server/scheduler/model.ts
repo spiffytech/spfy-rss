@@ -481,6 +481,8 @@ export interface FeedScheduleState {
   checkedAt: number | null
   /** Current committed target (epoch-ms), or null when never scheduled. */
   nextCheckAt: number | null
+  /** The origin's floor (Retry-After / cache freshness), when one is stored. */
+  fetchAfterAt?: number | null
   parsingErrorCount: number
 }
 

@@ -113,6 +113,9 @@ export async function fetchIconFor(
     await ensureFeedIcon({
       handle,
       feedId,
+      // Adding or saving a feed is an explicit ask: try even if a recent poll
+      // already used this feed's weekly attempt.
+      force: true,
       candidates: [parsed.iconUrl, origin === null ? null : `${origin}/favicon.ico`].filter(
         (candidate): candidate is string => candidate !== null,
       ),

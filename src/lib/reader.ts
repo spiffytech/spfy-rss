@@ -29,7 +29,7 @@ import {
 
 import * as api from '../server/actions'
 import { READ_LINE_FRACTION, clampNavIndex, shouldAutoRead } from '../shared/reading'
-import { filterIdentity, hasView, type EntriesFilter } from '../shared/filter'
+import { filterIdentity, hasView, searchScopeLabel, type EntriesFilter } from '../shared/filter'
 import type { CategoryId, EntryId, FeedId } from '../shared/ids'
 import {
   DEFAULT_HIDE_EMPTY_FEEDS,
@@ -321,12 +321,23 @@ export const createReader = (filter: () => EntriesFilter) => {
     (currentFeedId() ? panel.feedPrefs[currentFeedId()!]?.viewMode : undefined) ??
     DEFAULT_VIEW_MODE
 
+  /** What a search is confined to, or null when it spans everything. */
+  const searchScope = (): string | null =>
+    searchScopeLabel(filter(), panel.allFeeds, panel.categories)
+
   const currentTitle = (): string => {
     const active = filter()
-    if (active.search) return `Search: ${active.search}`
+    if (active.search) {
+      const scope = searchScope()
+      return scope ? `Search in ${scope}: ${active.search}` : `Search: ${active.search}`
+    }
     if (active.feedId) {
       const feed = panel.allFeeds.find((candidate) => candidate.id === active.feedId)
       return feed?.title ?? 'Feed'
+    }
+    if (active.categoryId) {
+      const category = panel.categories.find((candidate) => candidate.id === active.categoryId)
+      return category?.title ?? 'Folder'
     }
     if (active.starred) return 'Starred'
     return 'Home'
@@ -650,7 +661,11 @@ export const createReader = (filter: () => EntriesFilter) => {
       (next) => {
         if (token !== prefetchToken) return
         prefetching = false
-        prefetched = { entries: next.entries, nextCursor: next.nextCursor, from: cursorKey(cursor) }
+        prefetched = {
+          entries: next.entries,
+          nextCursor: next.nextCursor,
+          from: cursorKey(cursor),
+        }
         // Only now does the window grow, and the derive appends without waiting.
         setSession((draft) => {
           draft.wanted += PAGE_SIZE
@@ -1028,6 +1043,7 @@ export const createReader = (filter: () => EntriesFilter) => {
     session,
     setSession,
     currentTitle,
+    searchScope,
     unreadCount,
     effectiveViewMode,
     sortOrder,

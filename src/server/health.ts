@@ -36,9 +36,13 @@ const schedulerState = (
   const tickAgeMinutes = heartbeat.lastTickAt
     ? (now.getTime() - heartbeat.lastTickAt.getTime()) / 60_000
     : null
-  // A scheduler that was never started (disabled by config) is a choice, not a
-  // fault — the same rule the old single-endpoint version applied.
-  const stale = heartbeat.enabled && (tickAgeMinutes == null || tickAgeMinutes > staleAfterMinutes)
+  // Only a loop that claims to be running can be behind. `paused` and `disabled`
+  // are choices, not faults; `unknown` means there is no heartbeat file at all,
+  // so nothing has ever been observed and the alert must stay up.
+  const stale =
+    heartbeat.phase === 'unknown' ||
+    (heartbeat.phase === 'running' &&
+      (tickAgeMinutes == null || tickAgeMinutes > staleAfterMinutes))
   return { ...heartbeat, tickAgeMinutes, stale }
 }
 

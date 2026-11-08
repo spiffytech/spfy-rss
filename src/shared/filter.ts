@@ -21,6 +21,26 @@ export const zodEntriesFilter = z.object({
 
 export type EntriesFilter = z.infer<typeof zodEntriesFilter>
 
+/**
+ * The feed/folder/section a search is currently confined to, or null for a
+ * search across everything.
+ *
+ * Search inside the view you are already in is the expected behaviour, but the
+ * scope has to be sayable: the URL carries both `feed=` and `search=`, and
+ * without a label the results looked global while they were scoped.
+ */
+export const searchScopeLabel = (
+  filter: EntriesFilter,
+  feeds: readonly { id: string; title: string }[],
+  categories: readonly { id: string; title: string }[],
+): string | null => {
+  if (filter.feedId) return feeds.find((feed) => feed.id === filter.feedId)?.title ?? 'this feed'
+  if (filter.categoryId)
+    return categories.find((category) => category.id === filter.categoryId)?.title ?? 'this folder'
+  if (filter.starred) return 'Starred'
+  return null
+}
+
 /** A stable key for one view, for "did the URL change?" checks. */
 export const filterIdentity = (filter: EntriesFilter): string =>
   [

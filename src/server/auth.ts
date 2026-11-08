@@ -94,8 +94,19 @@ export function verifyLogin(
     .from(users)
     .where(eq(users.username, username.toLowerCase()))
     .get()
-  if (!row || row.passwordHash === '') return null
-  const ok = Bun.password.verifySync(password, row.passwordHash)
+  if (!row) return null
+  // `''` is the reserved-name sentinel (a username claimed by the import or the
+  // test seeder, with no password yet). Anything that is not an argon2 hash is
+  // "no credential": `verifySync` throws on it, and an uncaught throw here is a
+  // 500 that confirms the username exists.
+  if (!row.passwordHash.startsWith('$argon2')) return null
+  let ok = false
+  try {
+    ok = Bun.password.verifySync(password, row.passwordHash)
+  } catch {
+    // A truncated or otherwise corrupt hash is a failed login, not a 500.
+    ok = false
+  }
   return ok ? { id: row.id, username: row.username } : null
 }
 

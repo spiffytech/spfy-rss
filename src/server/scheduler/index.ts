@@ -33,7 +33,14 @@ import { feeds } from '../db/schema'
 import type { SchedulerConfig } from './config'
 import { loadSchedulerConfig } from './config'
 import { applyTargets, fetchLearnAggregates, fetchScheduleFeeds, type TargetWrite } from './db'
-import { lastTickAgeMinutes, markSchedulerStarted, markTick } from './heartbeat'
+import {
+  lastTickAgeMinutes,
+  markPaused,
+  markSchedulerDisabled,
+  markSchedulerResumed,
+  markSchedulerStarted,
+  markTick,
+} from './heartbeat'
 import {
   buildFeedModel,
   epochDay,
@@ -120,6 +127,9 @@ export function startScheduler(opts?: {
 }): (() => void) | null {
   const config = opts?.config ?? loadSchedulerConfig()
   if (!config.enabled) {
+    // Overwrite any previous run's heartbeat: the choice to disable must not
+    // leave a stale `running` file behind for the health route to report.
+    markSchedulerDisabled()
     console.warn('scheduler: SCHEDULER_ENABLED=0; feeds are not polled')
     return null
   }
@@ -150,14 +160,15 @@ export function startScheduler(opts?: {
 
   /** One fetch completion: record the origin's floor, then replan freely.
    *
-   *  `inserted` is what the fetch actually brought back — null when we cannot
-   *  tell (transport error, rate limit). This is the signal retry-until-delivery
-   *  runs on: inside the learned delivery window, an empty fetch means the
-   *  delivery is LATE, not absent, so look again shortly rather than tomorrow. */
+   *  `progress` is the signal retry-until-delivery runs on: `delivered` ends the
+   *  chain, `empty` means the delivery may be LATE (look again shortly), and
+   *  `failed` says nothing about delivery, so the remaining retries are kept for
+   *  the next successful check. Conflating "failed" with "nothing arrived" used
+   *  to cancel the chain on any 502 or 429. */
   const afterFetch = (
     feed: FeedScheduleState,
     floorMs: number | null,
-    inserted: number | null,
+    progress: 'delivered' | 'empty' | 'failed',
   ): void => {
     try {
       handle.db
@@ -170,11 +181,11 @@ export function startScheduler(opts?: {
       const model = models?.models.get(feed.id) ?? null
 
       // A delivery landed: the chain is done, plan the next bell.
-      if (inserted === null || inserted > 0) retryState.delete(feed.id)
+      if (progress === 'delivered') retryState.delete(feed.id)
 
       const nowMs = Date.now()
       let retryTarget: number | null = null
-      if (model && inserted === 0) {
+      if (model && progress === 'empty') {
         // Only on days the model EXPECTS a delivery. A weekend with no comic
         // due must not burn a retry chain on an empty feed.
         const dow = new Date(nowMs).getUTCDay()
@@ -191,14 +202,25 @@ export function startScheduler(opts?: {
               Math.ceil((model.deliverySpanMinute + RETRY_REACH_MINUTES) / RETRY_STEP_MINUTES),
             )
           if (left > 0) {
-            retryState.set(feed.id, left - 1)
+            // The chain ends when it is spent: leaving `0` behind made the next
+            // late delivery's first empty check arm nothing at all, so it waited
+            // for the next bell instead of retrying.
+            if (left === 1) retryState.delete(feed.id)
+            else retryState.set(feed.id, left - 1)
             // Anchored on checkedAt: `now + X` chases the clock and never comes due.
             retryTarget = (row.checkedAt ?? nowMs) + RETRY_STEP_MINUTES * 60_000
           }
         }
       }
 
-      const target =
+      // A live chain survives a failed check: the fetch told us nothing about
+      // delivery, so look again shortly rather than waiting for the next bell.
+      // When the origin DID speak (429 / Retry-After) its floor wins instead.
+      if (progress === 'failed' && floorMs === null && retryState.has(feed.id)) {
+        retryTarget = (row.checkedAt ?? nowMs) + RETRY_STEP_MINUTES * 60_000
+      }
+
+      let target =
         retryTarget ??
         planTarget(
           {
@@ -207,11 +229,19 @@ export function startScheduler(opts?: {
             checkedAt: row.checkedAt,
             nextCheckAt: row.nextCheckAt,
             parsingErrorCount: row.parsingErrorCount,
+            fetchAfterAt: row.fetchAfterAt,
           },
           model,
           bounds,
-          { nowMs, justFetched: true },
+          // The origin's floor is a fact we just learned; hand it to the planner
+          // instead of only persisting it for nobody to read.
+          { nowMs, justFetched: true, hintFloorMs: floorMs },
         )
+      // A failure that came with no Retry-After still must not be retried on the
+      // next tick: an unmodelled feed otherwise asks again every 60 seconds.
+      if (progress === 'failed' && floorMs === null) {
+        target = Math.max(target, nowMs + RETRY_STEP_MINUTES * 60_000)
+      }
       applyTargets(handle.db, [
         { id: feed.id, target: epochMs(target), expectedCheckedAt: row.checkedAt },
       ])
@@ -226,8 +256,8 @@ export function startScheduler(opts?: {
     hostsInFlight.add(host)
     void (async () => {
       let floorMs: number | null = null
-      // null = we cannot tell whether anything arrived (transport error, 429).
-      let inserted: number | null = null
+      // `failed` = we cannot tell whether anything arrived (transport error, 429).
+      let progress: 'delivered' | 'empty' | 'failed' = 'failed'
       try {
         const result = await fetchAndIngest({ handle, feedId: feed.id })
         const hint =
@@ -237,15 +267,15 @@ export function startScheduler(opts?: {
               ? result.freshnessMs
               : null
         if (hint != null) floorMs = Date.now() + hint
-        if (result.kind === 'ok') inserted = result.inserted
-        else if (result.kind === 'not-modified') inserted = 0
+        if (result.kind === 'ok') progress = result.inserted > 0 ? 'delivered' : 'empty'
+        else if (result.kind === 'not-modified') progress = 'empty'
       } catch (e) {
         console.error('scheduler: fetch failed', feed.id, e)
       } finally {
         inFlight.delete(feed.id)
         hostsInFlight.delete(host)
       }
-      afterFetch(feed, floorMs, inserted)
+      afterFetch(feed, floorMs, progress)
     })()
   }
 
@@ -324,6 +354,9 @@ export function startScheduler(opts?: {
       const targetMs = planTarget(feed, models.models.get(feed.id) ?? null, bounds, {
         nowMs: now,
         justFetched: false,
+        // The floor is persisted, so a crash between the write and the replan
+        // still honours the origin on the next boot.
+        hintFloorMs: feed.fetchAfterAt ?? null,
       })
       if (feed.nextCheckAt != null && Math.abs(targetMs - feed.nextCheckAt) <= TOLERANCE_MS)
         continue
@@ -340,6 +373,9 @@ export function startScheduler(opts?: {
     if (existsSync(OFF_FLAG())) {
       if (!reportedOff) {
         reportedOff = true
+        // A pause is a state, not a tick: record it once and leave `lastTickAt`
+        // alone, so a paused loop cannot masquerade as a fresh one.
+        markPaused()
         console.warn(`scheduler: disabled via ${OFF_FLAG()}; feeds are not polled`)
         void notify(
           config.ntfyUrl,
@@ -347,12 +383,12 @@ export function startScheduler(opts?: {
           `off-flag present at ${OFF_FLAG()}`,
         )
       }
-      markTick(true)
       if (!stopped) timer = setTimeout(run, TICK_MS)
       return
     }
     if (reportedOff) {
       reportedOff = false
+      markSchedulerResumed()
       void notify(config.ntfyUrl, 'reader scheduler resumed', 'off-flag removed')
     }
     const gap = lastTickAgeMinutes()

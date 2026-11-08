@@ -6,7 +6,7 @@ import { livenessReport, schedulerReport } from '../src/server/health'
 const NOW = new Date('2026-01-01T12:00:00Z')
 
 const heartbeat = (overrides: Partial<Heartbeat> = {}): Heartbeat => ({
-  enabled: true,
+  phase: 'running',
   lastTickAt: new Date(NOW.getTime() - 60_000),
   lastAttemptAt: new Date(NOW.getTime() - 60_000),
   lastTickOk: true,
@@ -64,11 +64,32 @@ test('/health/scheduler is the alert: 503 once a completed tick is stale', () =>
 })
 
 test('a disabled scheduler is a choice, not a failure, on both endpoints', () => {
-  const disabled = heartbeat({ enabled: false, lastTickAt: null })
+  const disabled = heartbeat({ phase: 'disabled', lastTickAt: null })
   expect(schedulerReport(disabled, 5, NOW).status).toBe(200)
   const liveness = livenessReport(() => {}, disabled, 5, NOW)
   expect(liveness.status).toBe(200)
   expect(liveness.body.degraded).toBe(false)
+})
+
+test('a paused scheduler is a choice, even with an ancient tick', () => {
+  // The off-flag stops polling without stopping the loop. It must not read as
+  // a healthy fresh tick, and it must not read as a failure either.
+  const paused = heartbeat({
+    phase: 'paused',
+    lastTickAt: new Date(NOW.getTime() - 7 * 24 * 60 * 60_000),
+  })
+  const report = schedulerReport(paused, 5, NOW)
+  expect(report.status).toBe(200)
+  expect((report.body.scheduler as { phase: string }).phase).toBe('paused')
+  expect((report.body.scheduler as { stale: boolean }).stale).toBe(false)
+})
+
+test('no heartbeat at all is not healthy', () => {
+  // No file means no evidence: the poller may never have booted.
+  const unknown = heartbeat({ phase: 'unknown', lastTickAt: null })
+  expect(schedulerReport(unknown, 5, NOW).status).toBe(503)
+  // ...but it still must not restart the container.
+  expect(livenessReport(() => {}, unknown, 5, NOW).status).toBe(200)
 })
 
 test('a failed tick does not refresh freshness', () => {

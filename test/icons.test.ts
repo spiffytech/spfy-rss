@@ -76,6 +76,39 @@ test('ensureFeedIcon fetches bytes once and then stands down', async () => {
   server.stop(true)
 })
 
+test('a failed icon attempt is retried only after the window', async () => {
+  let hits = 0
+  const server = Bun.serve({
+    port: 0,
+    fetch() {
+      hits++
+      return new Response('nope', { status: 404 })
+    },
+  })
+  const { handle } = setup()
+  const feedId = newFeedId(epochMs(NOW))
+  handle.sqlite.run(
+    'INSERT INTO feeds (id, user_id, category_id, title, feed_url, created_at) VALUES (?, (SELECT id FROM users), (SELECT id FROM categories), ?, ?, ?)',
+    [feedId, 'Blog', 'https://a.example/feed', NOW],
+  )
+  const base = `http://localhost:${server.port}`
+  const candidates = [`${base}/a.png`, `${base}/b.png`]
+
+  expect(await ensureFeedIcon({ handle, feedId, candidates, now: NOW })).toBe(false)
+  expect(hits).toBe(2) // every candidate tried once
+
+  // Inside the window: no requests at all, even though there is still no icon.
+  expect(await ensureFeedIcon({ handle, feedId, candidates, now: NOW + 86_400_000 })).toBe(false)
+  expect(hits).toBe(2)
+
+  // Past the window: one more round.
+  expect(await ensureFeedIcon({ handle, feedId, candidates, now: NOW + 8 * 86_400_000 })).toBe(
+    false,
+  )
+  expect(hits).toBe(4)
+  server.stop(true)
+})
+
 test('fetchAndIngest wires the whole cycle including the favicon fallback', async () => {
   let faviconHits = 0
   let base = ''
